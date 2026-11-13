@@ -18,11 +18,12 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      - name: Install SDK components (platform 29 / build-tools 29.0.3)
+      - name: Accept SDK licenses
         run: |
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKM" --licenses > /dev/null || true
-          "$SDKM" "platforms;android-29" "build-tools;29.0.3" > /dev/null
+          (yes | "$SDKM" --licenses > /dev/null) || true
+          echo "y" | "$SDKM" "platforms;android-29" "build-tools;29.0.3" || \
+          echo "sdkmanager install failed, letting Gradle auto-install"
 
       - name: Build debug APK
         run: |

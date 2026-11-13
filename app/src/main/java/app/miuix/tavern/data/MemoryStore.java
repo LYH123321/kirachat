@@ -44,19 +44,30 @@ public final class MemoryStore {
     private static final int EXTRACT_WINDOW = 12;
 
     private final LocalStore store;
+    private final String characterId;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean running = false;
 
     public MemoryStore(LocalStore store) {
         this.store = store;
+        this.characterId = "";
     }
 
-    // ---- 存取 ----
+    /** 按角色隔离的记忆存储：characterId 非空时读写该角色专属的记忆键。 */
+    public MemoryStore(LocalStore store, String characterId) {
+        this.store = store;
+        this.characterId = characterId == null ? "" : characterId;
+    }
 
+    private String prefKey() {
+        return (characterId == null || characterId.isEmpty())
+                ? PREF_KEY : "memories_" + characterId;
+    }
+    // ---- 存取 ----
     public synchronized List<MemoryItem> getAll() {
         List<MemoryItem> out = new ArrayList<>();
         try {
-            JSONArray array = new JSONArray(store.getRawPref(PREF_KEY, "[]"));
+            JSONArray array = new JSONArray(store.getRawPref(prefKey(), "[]"));
             for (int i = 0; i < array.length(); i++) {
                 JSONObject o = array.optJSONObject(i);
                 if (o == null) continue;
@@ -85,7 +96,7 @@ public final class MemoryStore {
                 o.put("createdAt", item.createdAt);
                 array.put(o);
             }
-            store.putRawPref(PREF_KEY, array.toString());
+            store.putRawPref(prefKey(), array.toString());
         } catch (Exception ignored) {
         }
     }

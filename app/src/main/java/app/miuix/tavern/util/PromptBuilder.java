@@ -84,6 +84,12 @@ public final class PromptBuilder {
                 }
             }
         }
+        // 上下文压缩：注入旧消息滚动总结（放在对话历史之前）
+        if (extras != null && extras.contextSummary != null
+                && !extras.contextSummary.trim().isEmpty()) {
+            put(messages, ChatMessage.SYSTEM, "[前情总结] " + extras.contextSummary
+                    + "\n（以上是更早对话的摘要，摘要之外的历史已省略）");
+        }
         int start = Math.max(0, history.size() - 36);
         List<TavernRegex.Script> promptScripts = extras != null ? extras.promptScripts : null;
         for (int i = start; i < history.size(); i++) {
@@ -106,6 +112,7 @@ public final class PromptBuilder {
         public String worldBookLore = "";
         public String memoryInjection = "";
         public List<TavernRegex.Script> promptScripts;
+        public String contextSummary = ""; // 上下文压缩：旧消息滚动总结
     }
 
     /**

@@ -31,6 +31,7 @@ public final class PresetStore {
         public final List<PresetPrompt> prompts = new ArrayList<>();
         public boolean enabled = true;
         public String characterId = ""; // 绑定角色卡；空 = 全局预设
+        public String regexScriptsJson = ""; // 预设自带正则（extensions.regex_scripts）
     }
 
     private static final String PREF_KEY = "presets";
@@ -101,7 +102,20 @@ public final class PresetStore {
             }
             preset.prompts.clear();
             preset.prompts.addAll(real);
-            return preset.prompts.isEmpty() ? null : preset;
+            // 抓取预设自带的正则脚本（extensions.regex_scripts，ST 预设常见位置）
+            try {
+                JSONObject ext = root.optJSONObject("extensions");
+                JSONArray rx = ext == null ? null : ext.optJSONArray("regex_scripts");
+                if (rx == null) rx = root.optJSONArray("regex_scripts");
+                if (rx != null && rx.length() > 0) {
+                    preset.regexScriptsJson = new JSONObject()
+                            .put("extensions", new JSONObject().put("regex_scripts", rx))
+                            .toString();
+                }
+            } catch (Exception ignored) {
+            }
+            return preset.prompts.isEmpty() && preset.regexScriptsJson.isEmpty()
+                    ? null : preset;
         } catch (Exception e) {
             return null;
         }
@@ -185,6 +199,8 @@ public final class PresetStore {
             o.put("name", p.name);
             o.put("enabled", p.enabled);
             o.put("characterId", p.characterId);
+            o.put("regexScriptsJson",
+                    p.regexScriptsJson == null ? "" : p.regexScriptsJson);
             JSONArray array = new JSONArray();
             for (PresetPrompt pp : p.prompts) {
                 JSONObject po = new JSONObject();
@@ -208,6 +224,7 @@ public final class PresetStore {
         p.name = o.optString("name", "未命名");
         p.enabled = o.optBoolean("enabled", true);
         p.characterId = o.optString("characterId", "");
+        p.regexScriptsJson = o.optString("regexScriptsJson", "");
         JSONArray array = o.optJSONArray("prompts");
         if (array != null) {
             for (int i = 0; i < array.length(); i++) {

@@ -376,6 +376,42 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
     }
 
     /** 汇总预设注入、独立世界书命中、记忆注入与 prompt 层正则脚本。 */
+    /** 上下文压缩：保留最近 COMPACT_KEEP 条原文，更早的用滚动要点摘要折叠（本地规则，零 API 开销）。 */
+    private static final int COMPACT_KEEP = 20;
+    private static final int SUMMARY_MAX_CHARS = 1500;
+
+    private String buildContextSummary(AppConfig config) {
+        int total = messages.size();
+        if (total <= COMPACT_KEEP + 4) return ""; // 还很短，不需要压缩
+        int cutoff = total - COMPACT_KEEP;
+        String key = "ctx_summary_" + character.id;
+        StringBuilder sb = new StringBuilder(store.getRawPref(key, ""));
+        boolean updated = false;
+        for (int i = 0; i < cutoff; i++) {
+            ChatMessage m = messages.get(i);
+            if (m == null || m.failed || m.content == null
+                    || m.content.trim().isEmpty()
+                    || ChatMessage.SYSTEM.equals(m.role)) continue;
+            String who = ChatMessage.USER.equals(m.role) ? "用户" : character.name;
+            // 每条折叠为一行要点（截断到 160 字符），避免整段重写
+            String line = who + ": " + m.content.trim().replace('\n', ' ');
+            if (line.length() > 160) line = line.substring(0, 160) + "…";
+            String tag = "·" + i + "|"; // 用消息序号做已折叠标记
+            if (sb.indexOf(tag + line) < 0) {
+                sb.append(tag).append(i).append("|").append(line).append('\n');
+                updated = true;
+            }
+        }
+        String summary = sb.toString();
+        if (summary.length() > SUMMARY_MAX_CHARS) {
+            // 摘要本身超预算时保留最新的部分
+            summary = "（更早内容已略）" + summary.substring(summary.length() - SUMMARY_MAX_CHARS);
+            updated = true;
+        }
+        if (updated) store.putRawPref(key, summary);
+        return summary;
+    }
+
     private PromptBuilder.BuildExtras buildExtras(AppConfig config) {
         PromptBuilder.BuildExtras extras = new PromptBuilder.BuildExtras();
         PresetStore.Preset preset = new PresetStore().activePreset(store, character.id);
@@ -388,9 +424,21 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
                         store, character.id, new ArrayList<>(messages),
                         PromptBuilder.localizedPersona(config))
                 : null;
-        MemoryStore memory = new MemoryStore(store);
+        MemoryStore memory = new MemoryStore(store, character.id);
         extras.memoryInjection = memory.buildInjection();
         extras.promptScripts = TavernRegex.fromCardJson(character.regexScriptsJson);
+        // 预设自带正则（extensions.regex_scripts）并入注入链
+        if (preset != null && preset.regexScriptsJson != null
+                && !preset.regexScriptsJson.trim().isEmpty()) {
+            List<TavernRegex.Script> presetScripts =
+                    TavernRegex.fromCardJson(preset.regexScriptsJson);
+            if (!presetScripts.isEmpty()) {
+                if (extras.promptScripts == null) extras.promptScripts = presetScripts;
+                else extras.promptScripts.addAll(presetScripts);
+            }
+        }
+        // 上下文压缩：超过阈值时把旧消息折叠为滚动总结，随历史一起注入
+        extras.contextSummary = buildContextSummary(config);
         return extras;
     }
 

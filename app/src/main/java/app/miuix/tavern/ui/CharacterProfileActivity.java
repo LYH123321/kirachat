@@ -672,7 +672,7 @@ public final class CharacterProfileActivity extends AppCompatActivity {
 
     /** 记忆管理：列表查看、手动添加、单条删除、全部清空。 */
     private void showMemoryManager() {
-        MemoryStore memory = new MemoryStore(store);
+        MemoryStore memory = new MemoryStore(store, character.id);
         List<MemoryStore.MemoryItem> items = memory.getAll();
         LinearLayout box = MiuixUi.vertical(this);
         ScrollView scroll = new ScrollView(this);
@@ -850,6 +850,8 @@ public final class CharacterProfileActivity extends AppCompatActivity {
                 .setNegativeButton("取消", null)
                 .setPositiveButton("清空", (dialog, which) -> {
                     store.saveMessages(character.id, new ArrayList<>());
+                    // 同步清掉上下文压缩摘要，避免旧对话残留
+                    store.putRawPref("ctx_summary_" + character.id, "");
                     LocalizedToast.makeText(this, "聊天记录已清空", Toast.LENGTH_SHORT).show();
                 })
                 .show();

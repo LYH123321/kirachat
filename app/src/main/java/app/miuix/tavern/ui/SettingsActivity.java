@@ -260,6 +260,61 @@ public final class SettingsActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, MiuixUi.dp(this, 48)));
         connection.addView(autonomousRow, bodyParams(9, 0));
         addWithMargins(page, connection, 14, 0, 14, 12);
+        // ---- 记忆与检索（mem0 自动记忆 + 世界书 RAG 命中开关） ----
+        LinearLayout memoryCard = MiuixUi.card(this);
+        memoryCard.addView(cardHeader("记忆与检索", "mem0 · RAG"));
+        LinearLayout autoMemoryRow = MiuixUi.horizontal(this);
+        autoMemoryRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout autoMemoryLabels = MiuixUi.vertical(this);
+        autoMemoryLabels.addView(MiuixUi.text(
+                this, "自动长期记忆", 15, MiuixUi.TEXT_PRIMARY, true));
+        TextView autoMemoryDetail = MiuixUi.text(this,
+                "每轮对话后自动抽取事实并维护记忆库（mem0 两阶段："
+                        + "事实抽取 → 增改删决策），记忆会注入后续对话的系统提示词。"
+                        + "也可在角色资料页「记忆管理」中手动查看/添加。",
+                12.5f, MiuixUi.TEXT_SECONDARY, false);
+        autoMemoryDetail.setMaxLines(4);
+        autoMemoryLabels.addView(autoMemoryDetail);
+        autoMemoryRow.addView(autoMemoryLabels, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        SwitchCompat autoMemorySwitch = new SwitchCompat(this);
+        autoMemorySwitch.setChecked(config.autoMemory);
+        autoMemorySwitch.setShowText(false);
+        autoMemorySwitch.setContentDescription(L10n.tr(this, "自动长期记忆"));
+        autoMemoryRow.addView(autoMemorySwitch, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, MiuixUi.dp(this, 48)));
+        memoryCard.addView(autoMemoryRow, bodyParams(9, 0));
+        LinearLayout ragRow = MiuixUi.horizontal(this);
+        ragRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout ragLabels = MiuixUi.vertical(this);
+        ragLabels.addView(MiuixUi.text(
+                this, "世界书 RAG 检索", 15, MiuixUi.TEXT_PRIMARY, true));
+        TextView ragDetail = MiuixUi.text(this,
+                "按关键词相关性扫描角色绑定的独立世界书与卡内世界书，"
+                        + "命中条目自动注入本对话上下文（世界书页长按角色卡可绑定书）。",
+                12.5f, MiuixUi.TEXT_SECONDARY, false);
+        ragDetail.setMaxLines(4);
+        ragLabels.addView(ragDetail);
+        ragRow.addView(ragLabels, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        SwitchCompat ragSwitch = new SwitchCompat(this);
+        ragSwitch.setChecked(config.ragRetrieval);
+        ragSwitch.setShowText(false);
+        ragSwitch.setContentDescription(L10n.tr(this, "世界书 RAG 检索"));
+        ragRow.addView(ragSwitch, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, MiuixUi.dp(this, 48)));
+        memoryCard.addView(ragRow, bodyParams(9, 0));
+        autoMemorySwitch.setOnCheckedChangeListener((button, checked) -> {
+            AppConfig saved = readForm();
+            saved.autoMemory = checked;
+            store.saveConfig(saved);
+        });
+        ragSwitch.setOnCheckedChangeListener((button, checked) -> {
+            AppConfig saved = readForm();
+            saved.ragRetrieval = checked;
+            store.saveConfig(saved);
+        });
+        addWithMargins(page, memoryCard, 14, 0, 14, 12);
 
         LinearLayout account = MiuixUi.card(this);
         account.addView(cardHeader("账户", "GPT / GitHub Copilot"));
@@ -1295,6 +1350,9 @@ public final class SettingsActivity extends AppCompatActivity {
                 || characterAutonomousSwitch.isChecked();
         config.groupAutonomousMessages = groupAutonomousSwitch == null
                 || groupAutonomousSwitch.isChecked();
+        // 记忆/检索开关即时保存，这里从已存配置带过来，避免被表单重置
+        config.autoMemory = previous.autoMemory;
+        config.ragRetrieval = previous.ragRetrieval;
         if (config.baseUrl.isEmpty()) config.baseUrl = "https://api.openai.com/v1";
         if (config.persona.isEmpty()) config.persona = "你";
         if (config.gptModel.isEmpty()) config.gptModel = "gpt-5.4";

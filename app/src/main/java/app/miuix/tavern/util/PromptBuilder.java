@@ -117,8 +117,17 @@ public final class PromptBuilder {
         if (store == null || characterId == null) return "";
         List<LocalStore.CharacterLink> links = store.getCharacterLinks();
         List<String> bookIds = new ArrayList<>();
+        List<String> globalIds = new ArrayList<>();
+        WorldBookStore bookStoreEarly = new WorldBookStore(store);
+        for (WorldBookStore.Book b : bookStoreEarly.getBooks()) {
+            if (b.global) globalIds.add(b.id);
+        }
         for (LocalStore.CharacterLink link : links) {
-            if (characterId.equals(link.characterId)) bookIds.add(link.worldBookId);
+            if (characterId.equals(link.characterId)
+                    && !bookIds.contains(link.worldBookId)) bookIds.add(link.worldBookId);
+        }
+        for (String gid : globalIds) {
+            if (!bookIds.contains(gid)) bookIds.add(gid);
         }
         if (bookIds.isEmpty()) return "";
         WorldBookStore bookStore = new WorldBookStore(store);

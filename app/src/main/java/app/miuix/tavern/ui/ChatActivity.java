@@ -378,14 +378,16 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
     /** 汇总预设注入、独立世界书命中、记忆注入与 prompt 层正则脚本。 */
     private PromptBuilder.BuildExtras buildExtras(AppConfig config) {
         PromptBuilder.BuildExtras extras = new PromptBuilder.BuildExtras();
-        PresetStore.Preset preset = new PresetStore().activePreset(store);
+        PresetStore.Preset preset = new PresetStore().activePreset(store, character.id);
         if (preset != null) {
             extras.presetMessages = PresetStore.buildPresetMessages(
                     preset, character.name, config.persona);
         }
-        extras.worldBookLore = PromptBuilder.loreFromExtraBooks(
-                store, character.id, new ArrayList<>(messages),
-                PromptBuilder.localizedPersona(config));
+        extras.worldBookLore = config.ragRetrieval
+                ? PromptBuilder.loreFromExtraBooks(
+                        store, character.id, new ArrayList<>(messages),
+                        PromptBuilder.localizedPersona(config))
+                : null;
         MemoryStore memory = new MemoryStore(store);
         extras.memoryInjection = memory.buildInjection();
         extras.promptScripts = TavernRegex.fromCardJson(character.regexScriptsJson);
@@ -471,15 +473,24 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
     private void triggerMemoryExtraction(ChatMessage completed) {
         if (memoryExtracting) return;
         AppConfig config = store.getConfig();
+        if (!config.autoMemory) return;
         String apiKey = secureStore.getDirectApiKey();
         if (apiKey == null || apiKey.trim().isEmpty()) return;
         memoryExtracting = true;
         MemoryStore memory = new MemoryStore(store);
         List<ChatMessage> snapshot = new ArrayList<>(messages);
+        final String replySnapshot = completed.content;
         new Thread(() -> {
             try {
                 memory.extractFacts(this, config, secureStore, apiKey, snapshot,
-                        completed.content, count -> memoryExtracting = false);
+                        replySnapshot, count -> {
+                            memoryExtracting = false;
+                            if (count > 0) {
+                                runOnUiThread(() -> LocalizedToast.makeText(this,
+                                        "已更新 " + count + " 条长期记忆",
+                                        Toast.LENGTH_SHORT).show());
+                            }
+                        });
             } catch (Exception e) {
                 memoryExtracting = false;
             }

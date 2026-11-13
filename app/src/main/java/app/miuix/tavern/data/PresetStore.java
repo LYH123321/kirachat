@@ -30,6 +30,7 @@ public final class PresetStore {
         public String name;
         public final List<PresetPrompt> prompts = new ArrayList<>();
         public boolean enabled = true;
+        public String characterId = ""; // 绑定角色卡；空 = 全局预设
     }
 
     private static final String PREF_KEY = "presets";
@@ -155,15 +156,24 @@ public final class PresetStore {
         savePresets(store, presets);
     }
 
-    /** 取当前启用的预设（简化：第一个 enabled 且勾选了至少一条 prompt 的预设）。 */
+    /** 取当前启用的预设：优先取绑定到该角色的预设，否则取全局预设（第一个 enabled 且勾选了 prompt 的）。 */
     public synchronized Preset activePreset(LocalStore store) {
+        return activePreset(store, null);
+    }
+    public synchronized Preset activePreset(LocalStore store, String characterId) {
+        Preset global = null;
         for (Preset p : getPresets(store)) {
             if (!p.enabled) continue;
+            boolean hasEnabled = false;
             for (PresetPrompt pp : p.prompts) {
-                if (pp.enabled) return p;
+                if (pp.enabled) { hasEnabled = true; break; }
             }
+            if (!hasEnabled) continue;
+            boolean bound = p.characterId != null && !p.characterId.isEmpty();
+            if (bound && p.characterId.equals(characterId)) return p;
+            if (!bound && global == null) global = p;
         }
-        return null;
+        return global;
     }
 
     // ---- 序列化 ----
@@ -174,6 +184,7 @@ public final class PresetStore {
             o.put("id", p.id);
             o.put("name", p.name);
             o.put("enabled", p.enabled);
+            o.put("characterId", p.characterId);
             JSONArray array = new JSONArray();
             for (PresetPrompt pp : p.prompts) {
                 JSONObject po = new JSONObject();
@@ -196,6 +207,7 @@ public final class PresetStore {
         p.id = o.optString("id", UUID.randomUUID().toString());
         p.name = o.optString("name", "未命名");
         p.enabled = o.optBoolean("enabled", true);
+        p.characterId = o.optString("characterId", "");
         JSONArray array = o.optJSONArray("prompts");
         if (array != null) {
             for (int i = 0; i < array.length(); i++) {

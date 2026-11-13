@@ -21,6 +21,8 @@ import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.widget.SwitchCompat;
+
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -407,9 +409,11 @@ public final class MainActivity extends AppCompatActivity {
             row.addView(labels, labelsParams);
             labels.addView(MiuixUi.rawText(this, book.name, 17, MiuixUi.TEXT_PRIMARY, true));
             labels.addView(MiuixUi.text(this,
-                    book.enabledCount() + "/" + book.entries.size() + " 条启用 · 长按管理",
+                    book.enabledCount() + "/" + book.entries.size() + " 条启用 · 长按管理"
+                            + (book.global ? " · 全局" : ""),
                     13, MiuixUi.TEXT_SECONDARY, false));
-            TextView status = MiuixUi.text(this, book.enabled ? "已启用" : "已停用", 12,
+            TextView status = MiuixUi.text(this,
+                    book.enabled ? (book.global ? "全局启用" : "已启用") : "已停用", 12,
                     book.enabled ? MiuixUi.GREEN : MiuixUi.TEXT_SECONDARY, true);
             status.setGravity(Gravity.CENTER);
             status.setBackground(MiuixUi.shape(book.enabled
@@ -735,9 +739,11 @@ public final class MainActivity extends AppCompatActivity {
         WorldBookStore bookStore = new WorldBookStore(store);
         WorldBookStore.Book book = bookStore.getBook(bookId);
         if (book == null) return;
-        String[] options = {"添加条目", "绑定到角色卡", book.enabled ? "停用此书" : "启用此书", "删除此书"};
+        String[] options = {"添加条目", "绑定到角色卡", book.enabled ? "停用此书" : "启用此书",
+                book.global ? "取消全局（仅绑定的角色生效）" : "设为全局书（所有角色生效）",
+                "删除此书"};
         new LocalizedAlertDialogBuilder(this)
-                .setTitle(book.name)
+                .setTitle(book.name + (book.global ? " ｜全局" : ""))
                 .setItems(options, (dialog, which) -> {
                     if (which == 0) {
                         showEntryEditor(book.id, null, null);
@@ -748,6 +754,10 @@ public final class MainActivity extends AppCompatActivity {
                         bookStore.upsertBook(book);
                         showTab(2);
                     } else if (which == 3) {
+                        book.global = !book.global;
+                        bookStore.upsertBook(book);
+                        showTab(2);
+                    } else if (which == 4) {
                         bookStore.deleteBook(book.id);
                         showTab(2);
                     }
@@ -814,16 +824,21 @@ public final class MainActivity extends AppCompatActivity {
         final WorldBookStore.Entry entryFinal = entry;
         final WorldBookStore.Book bookFinal = book;
         LinearLayout box = MiuixUi.vertical(this);
-        EditText keysInput = MiuixUi.field(this, "关键词（逗号分隔）", false);
+        EditText keysInput = MiuixUi.field(this, "关键词（逗号分隔，留空=常驻条目）", false);
         keysInput.setText(target.keys);
         EditText contentInput = MiuixUi.field(this, "条目内容", false);
         contentInput.setText(target.content);
         contentInput.setMinLines(3);
         EditText commentInput = MiuixUi.field(this, "备注（可选）", false);
         commentInput.setText(target.comment);
+        SwitchCompat enableSwitch = new SwitchCompat(this);
+        enableSwitch.setChecked(target.enabled);
+        enableSwitch.setText("启用此条目");
+        enableSwitch.setShowText(false);
         box.addView(keysInput);
         box.addView(contentInput);
         box.addView(commentInput);
+        box.addView(enableSwitch);
         AlertDialog dialog = new LocalizedAlertDialogBuilder(this)
                 .setTitle(entry == null ? "添加条目" : "编辑条目")
                 .setView(box)
@@ -843,12 +858,14 @@ public final class MainActivity extends AppCompatActivity {
                 created.content = content;
                 created.comment = commentInput.getText().toString().trim();
                 created.constant = keys.isEmpty();
-                created.enabled = true;
+                created.enabled = enableSwitch.isChecked();
                 bookFinal.entries.add(created);
             } else {
                 entryFinal.keys = keys;
                 entryFinal.content = content;
                 entryFinal.comment = commentInput.getText().toString().trim();
+                entryFinal.constant = keys.isEmpty();
+                entryFinal.enabled = enableSwitch.isChecked();
             }
             bookStore.upsertBook(bookFinal);
             dialog.dismiss();
@@ -894,9 +911,16 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void showPresetDetail(PresetStore presetStore, PresetStore.Preset preset) {
+        String boundName = "";
+        if (preset.characterId != null && !preset.characterId.isEmpty()) {
+            for (CharacterCard c : store.getCharacters()) {
+                if (c.id.equals(preset.characterId)) { boundName = " ｜绑定:" + c.name; break; }
+            }
+        }
         String[] options = {
                 preset.enabled ? "整体停用" : "设为启用（生效）",
-                "查看 prompt 列表",
+                "prompt 逐条开关",
+                "绑定到角色卡（当前：" + (boundName.isEmpty() ? "全局" : boundName) + "）",
                 "删除此预设"
         };
         new LocalizedAlertDialogBuilder(this)
@@ -907,22 +931,68 @@ public final class MainActivity extends AppCompatActivity {
                         presetStore.upsertPreset(store, preset);
                         showTab(2);
                     } else if (which == 1) {
-                        StringBuilder detail = new StringBuilder();
-                        for (PresetStore.PresetPrompt pp : preset.prompts) {
-                            detail.append(pp.enabled ? "● " : "○ ")
-                                    .append(pp.name)
-                                    .append(" [").append(pp.role).append("]\n");
-                        }
-                        new LocalizedAlertDialogBuilder(this)
-                                .setTitle(preset.name)
-                                .setMessage(detail.toString())
-                                .setPositiveButton("完成", null)
-                                .show();
+                        showPresetPromptToggles(presetStore, preset);
                     } else if (which == 2) {
+                        showPresetBindDialog(presetStore, preset);
+                    } else if (which == 3) {
                         presetStore.deletePreset(store, preset.id);
                         showTab(2);
                     }
                 })
+                .show();
+    }
+    /** 预设内 prompt 逐条启用/停用（多选对话框，保存后立即生效）。 */
+    private void showPresetPromptToggles(PresetStore presetStore, PresetStore.Preset preset) {
+        if (preset.prompts.isEmpty()) {
+            LocalizedToast.makeText(this, "此预设没有 prompt", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        CharSequence[] names = new CharSequence[preset.prompts.size()];
+        boolean[] checked = new boolean[preset.prompts.size()];
+        for (int i = 0; i < preset.prompts.size(); i++) {
+            PresetStore.PresetPrompt pp = preset.prompts.get(i);
+            names[i] = (pp.name == null || pp.name.isEmpty() ? pp.identifier : pp.name)
+                    + " [" + pp.role + "]";
+            checked[i] = pp.enabled;
+        }
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle("prompt 开关（勾选=注入）")
+                .setMultiChoiceItems(names, checked, (dialog, which, isChecked) -> { })
+                .setPositiveButton("保存", (dialog, which) -> {
+                    for (int i = 0; i < preset.prompts.size(); i++) {
+                        preset.prompts.get(i).enabled = checked[i];
+                    }
+                    presetStore.upsertPreset(store, preset);
+                    LocalizedToast.makeText(this, "prompt 开关已保存", Toast.LENGTH_SHORT).show();
+                    showTab(2);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+    /** 把预设绑定到单个角色卡（选「全局」则所有角色生效）。 */
+    private void showPresetBindDialog(PresetStore presetStore, PresetStore.Preset preset) {
+        List<CharacterCard> cards = store.getCharacters();
+        List<String> ids = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        ids.add("");
+        names.add("全局（所有角色生效）");
+        for (CharacterCard c : cards) {
+            ids.add(c.id);
+            names.add(c.name);
+        }
+        int selected = ids.indexOf(preset.characterId == null ? "" : preset.characterId);
+        final int[] picked = {Math.max(0, selected)};
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle("预设生效范围")
+                .setSingleChoiceItems(names.toArray(new CharSequence[0]), picked[0],
+                        (dialog, which) -> picked[0] = which)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    preset.characterId = ids.get(picked[0]);
+                    presetStore.upsertPreset(store, preset);
+                    LocalizedToast.makeText(this, "预设绑定已保存", Toast.LENGTH_SHORT).show();
+                    showTab(2);
+                })
+                .setNegativeButton("取消", null)
                 .show();
     }
 
@@ -1240,8 +1310,9 @@ public final class MainActivity extends AppCompatActivity {
     private void importCharacter() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
+        // 不按 MIME 过滤：部分文件管理器把 PNG 报成 octet-stream 会被误滤掉，
+        // 允许选任意文件，导入时按内容（PNG 魔数 / JSON）判断。
         intent.setType("*/*");
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/json", "image/png"});
         startActivityForResult(intent, IMPORT_CARD);
     }
 
@@ -1266,6 +1337,22 @@ public final class MainActivity extends AppCompatActivity {
                         int n;
                         while (input != null && (n = input.read(chunk)) > 0) {
                             buffer.write(chunk, 0, n);
+                        }
+                        byte[] bytes = buffer.toByteArray();
+                        // PNG 误选到这里：自动转角色卡导入
+                        if (bytes.length >= 8 && bytes[0] == (byte) 0x89
+                                && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G') {
+                            try {
+                                CharacterCardImporter.Result result =
+                                        CharacterCardImporter.parse(
+                                                new java.io.ByteArrayInputStream(bytes));
+                                runOnUiThread(() -> chooseCharacterImportMode(result));
+                            } catch (Exception pe) {
+                                runOnUiThread(() -> LocalizedToast.makeText(this,
+                                        "PNG 角色卡导入失败：" + pe.getMessage(),
+                                        Toast.LENGTH_LONG).show());
+                            }
+                            return;
                         }
                         String json = buffer.toString("UTF-8");
                         WorldBookStore.Book book = WorldBookStore.parseWorldBookJson(

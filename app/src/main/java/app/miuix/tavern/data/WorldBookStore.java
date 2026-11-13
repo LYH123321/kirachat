@@ -36,6 +36,7 @@ public final class WorldBookStore {
         public String name;
         public final List<Entry> entries = new ArrayList<>();
         public boolean enabled = true;
+        public boolean global = false; // 全局书：对所有角色生效，无需绑定
 
         public int enabledCount() {
             int n = 0;
@@ -216,6 +217,7 @@ public final class WorldBookStore {
             o.put("id", b.id);
             o.put("name", b.name);
             o.put("enabled", b.enabled);
+            o.put("global", b.global);
             JSONArray array = new JSONArray();
             for (Entry e : b.entries) {
                 JSONObject eo = new JSONObject();
@@ -242,6 +244,7 @@ public final class WorldBookStore {
         b.id = o.optString("id", UUID.randomUUID().toString());
         b.name = o.optString("name", "未命名");
         b.enabled = o.optBoolean("enabled", true);
+        b.global = o.optBoolean("global", false);
         JSONArray array = o.optJSONArray("entries");
         if (array != null) {
             for (int i = 0; i < array.length(); i++) {

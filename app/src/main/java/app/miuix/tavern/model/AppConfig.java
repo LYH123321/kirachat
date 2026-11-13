@@ -44,6 +44,8 @@ public final class AppConfig {
     public boolean webSearch = true;
     public boolean characterAutonomousMessages = true;
     public boolean groupAutonomousMessages = true;
+    public boolean autoMemory = true;
+    public boolean ragRetrieval = true;
 
     public JSONObject toJson() throws JSONException {
         return new JSONObject()
@@ -71,7 +73,9 @@ public final class AppConfig {
                 .put("showReasoning", showReasoning)
                 .put("webSearch", webSearch)
                 .put("characterAutonomousMessages", characterAutonomousMessages)
-                .put("groupAutonomousMessages", groupAutonomousMessages);
+                .put("groupAutonomousMessages", groupAutonomousMessages)
+                .put("autoMemory", autoMemory)
+                .put("ragRetrieval", ragRetrieval);
     }
 
     public static AppConfig fromJson(JSONObject object) {
@@ -138,6 +142,8 @@ public final class AppConfig {
                 object.optBoolean("characterAutonomousMessages", true);
         config.groupAutonomousMessages =
                 object.optBoolean("groupAutonomousMessages", true);
+        config.autoMemory = object.optBoolean("autoMemory", true);
+        config.ragRetrieval = object.optBoolean("ragRetrieval", true);
         return config;
     }
 

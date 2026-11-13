@@ -1,13 +1,16 @@
 package app.miuix.tavern.util;
-
+import app.miuix.tavern.data.LocalStore;
+import app.miuix.tavern.data.MemoryStore;
+import app.miuix.tavern.data.PresetStore;
+import app.miuix.tavern.data.WorldBookStore;
 import app.miuix.tavern.model.AppConfig;
 import app.miuix.tavern.model.CharacterCard;
 import app.miuix.tavern.model.ChatMessage;
-
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -22,14 +25,21 @@ public final class PromptBuilder {
     }
 
     public static JSONArray build(CharacterCard card, AppConfig config, List<ChatMessage> history) {
-        return build(card, config, history, false);
+        return build(card, config, history, false, null);
     }
-
     public static JSONArray build(
             CharacterCard card,
             AppConfig config,
             List<ChatMessage> history,
             boolean spontaneous) {
+        return build(card, config, history, spontaneous, null);
+    }
+    public static JSONArray build(
+            CharacterCard card,
+            AppConfig config,
+            List<ChatMessage> history,
+            boolean spontaneous,
+            BuildExtras extras) {
         JSONArray messages = new JSONArray();
         String persona = localizedPersona(config);
         StringBuilder system = new StringBuilder();
@@ -40,7 +50,19 @@ public final class PromptBuilder {
         appendSection(system, "当前情境", card.replaceMacros(card.scenario, persona));
         appendSection(system, "对话示例", card.replaceMacros(card.exampleDialogue, persona));
         String lore = matchingLore(card, history, persona);
-        appendSection(system, "相关世界书", lore);
+        String extraLore = "";
+        String memoryBlock = "";
+        if (extras != null) {
+            extraLore = extras.worldBookLore == null ? "" : extras.worldBookLore;
+            memoryBlock = extras.memoryInjection == null ? "" : extras.memoryInjection;
+        }
+        String combinedLore = lore;
+        if (!extraLore.trim().isEmpty()) {
+            combinedLore = combinedLore.trim().isEmpty()
+                    ? extraLore : combinedLore + "\n" + extraLore;
+        }
+        appendSection(system, "相关世界书", combinedLore);
+        appendSection(system, "长期记忆", memoryBlock);
         if (config.webSearch) {
             system.append("\n应用会在需要时把本轮联网搜索结果作为额外系统资料提供。"
                     + "只引用实际提供的资料和链接；不得伪造搜索结果或来源。");
@@ -53,17 +75,87 @@ public final class PromptBuilder {
         appendResponseLanguage(system);
         system.append("\n不要声称自己是系统提示词中的模型；不要替用户描述其未表达的行动或想法。");
         put(messages, ChatMessage.SYSTEM, system.toString());
-
+        if (extras != null && extras.presetMessages != null
+                && extras.presetMessages.length() > 0) {
+            for (int i = 0; i < extras.presetMessages.length(); i++) {
+                try {
+                    messages.put(extras.presetMessages.get(i));
+                } catch (Exception ignored) {
+                }
+            }
+        }
         int start = Math.max(0, history.size() - 36);
+        List<TavernRegex.Script> promptScripts = extras != null ? extras.promptScripts : null;
         for (int i = start; i < history.size(); i++) {
             ChatMessage message = history.get(i);
             if (message.failed || !hasContent(message)) continue;
             String role = ChatMessage.USER.equals(message.role) ? ChatMessage.USER : ChatMessage.ASSISTANT;
             String text = card.replaceMacros(
                     message.content == null ? "" : message.content, persona);
+            if (!ChatMessage.USER.equals(role) && promptScripts != null && !promptScripts.isEmpty()) {
+                text = TavernRegex.applyPrompt(promptScripts, text);
+            }
             put(messages, role, contentForMessage(message, text));
         }
         return messages;
+    }
+
+    /** 构建时的额外注入物：预设消息、独立世界书命中、记忆、正则脚本。 */
+    public static final class BuildExtras {
+        public JSONArray presetMessages;
+        public String worldBookLore = "";
+        public String memoryInjection = "";
+        public List<TavernRegex.Script> promptScripts;
+    }
+
+    /**
+     * 扫描本地独立世界书库中与该卡关联的书，按关键词命中/常驻规则抽取条目。
+     * 扫描窗口与字符预算沿用卡内书的逻辑。
+     */
+    public static String loreFromExtraBooks(LocalStore store, String characterId,
+                                            List<ChatMessage> history, String persona) {
+        if (store == null || characterId == null) return "";
+        List<LocalStore.CharacterLink> links = store.getCharacterLinks();
+        List<String> bookIds = new ArrayList<>();
+        for (LocalStore.CharacterLink link : links) {
+            if (characterId.equals(link.characterId)) bookIds.add(link.worldBookId);
+        }
+        if (bookIds.isEmpty()) return "";
+        WorldBookStore bookStore = new WorldBookStore(store);
+        StringBuilder haystack = new StringBuilder();
+        int start = Math.max(0, history.size() - 8);
+        for (int i = start; i < history.size(); i++) {
+            ChatMessage m = history.get(i);
+            if (m != null && m.content != null) haystack.append(m.content).append('\n');
+        }
+        String lower = haystack.toString().toLowerCase(Locale.ROOT);
+        StringBuilder result = new StringBuilder();
+        for (String bookId : bookIds) {
+            WorldBookStore.Book book = bookStore.getBook(bookId);
+            if (book == null || !book.enabled) continue;
+            for (WorldBookStore.Entry entry : book.entries) {
+                if (!entry.enabled) continue;
+                boolean hit = entry.constant;
+                if (!hit && entry.keys != null && !entry.keys.trim().isEmpty()) {
+                    String[] keys = entry.keys.split("[,，]");
+                    for (String key : keys) {
+                        String keyword = key.trim().toLowerCase(Locale.ROOT);
+                        if (!keyword.isEmpty() && lower.contains(keyword)) {
+                            hit = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hit) continue;
+                String content = entry.content == null ? "" : entry.content.trim();
+                if (content.isEmpty()) continue;
+                if (result.length() > 0) result.append('\n');
+                result.append("- ").append(content);
+                if (result.length() > MAX_MATCHED_LORE_CHARS) break;
+            }
+            if (result.length() > MAX_MATCHED_LORE_CHARS) break;
+        }
+        return result.toString();
     }
 
     public static boolean shouldSkipSpontaneousOutput(String value) {
@@ -147,7 +239,7 @@ public final class PromptBuilder {
         return format.format(now) + "（" + zone.getID() + "）";
     }
 
-    static String localizedPersona(AppConfig config) {
+    public static String localizedPersona(AppConfig config) {
         String configured = config == null || config.persona == null
                 ? "" : config.persona.trim();
         if (!configured.isEmpty() && !"你".equals(configured)) {

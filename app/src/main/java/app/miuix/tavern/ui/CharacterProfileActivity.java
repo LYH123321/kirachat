@@ -10,6 +10,7 @@ import android.text.format.DateFormat;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
@@ -22,6 +23,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import app.miuix.tavern.data.LocalStore;
+import app.miuix.tavern.data.MemoryStore;
 import app.miuix.tavern.model.CharacterCard;
 import app.miuix.tavern.model.ChatMessage;
 import app.miuix.tavern.util.CharacterCardImporter;
@@ -81,16 +83,15 @@ public final class CharacterProfileActivity extends AppCompatActivity {
         page.addView(buildProfileHeader());
         page.addView(divider(18));
         page.addView(detailRow(
-                "角色资料", "描述、性格与场景", true, v -> showCharacterInfo()));
+                "角色资料", "点击编辑描述、性格与场景", true, v -> editCharacterInfo()));
         page.addView(divider(18));
         page.addView(detailRow(
                 "开场白", preview(displayText(character.firstMessage), "暂无开场白"), true,
-                v -> showText("开场白", displayText(character.firstMessage), "这个角色还没有开场白。")));
-
+                v -> editCharacterText("开场白", "firstMessage")));
         page.addView(sectionGap());
         page.addView(detailRow(
                 "角色描述", preview(displayText(character.description), "暂无角色描述"), true,
-                v -> showText("角色描述", displayText(character.description), "这个角色还没有描述。")));
+                v -> editCharacterText("角色描述", "description")));
         page.addView(divider(18));
         page.addView(detailRow(
                 "世界书",
@@ -102,8 +103,7 @@ public final class CharacterProfileActivity extends AppCompatActivity {
         page.addView(divider(18));
         page.addView(detailRow(
                 "创作者备注", preview(displayText(character.creatorNotes), "暂无备注"), true,
-                v -> showText("创作者备注", displayText(character.creatorNotes), "这个角色还没有创作者备注。")));
-
+                v -> editCharacterText("创作者备注", "creatorNotes")));
         page.addView(sectionGap());
         page.addView(actionRow(
                 LineIconView.CHAT, "发消息", "开始与" + character.name + "聊天", v -> openChat()));
@@ -111,6 +111,10 @@ public final class CharacterProfileActivity extends AppCompatActivity {
         page.addView(actionRow(
                 LineIconView.PHONE, "语音通话", "与" + character.name + "进行语音通话",
                 v -> openVoiceCall()));
+        page.addView(divider(0));
+        page.addView(actionRow(
+                LineIconView.BOOK, "记忆管理", "查看、添加与清除自动记忆",
+                v -> showMemoryManager()));
 
         View footer = new View(this);
         page.addView(footer, new LinearLayout.LayoutParams(
@@ -582,6 +586,142 @@ public final class CharacterProfileActivity extends AppCompatActivity {
                 .setMessage(detail.toString())
                 .setPositiveButton("完成", null)
                 .show();
+    }
+
+    /** 编辑角色资料四件套（描述/性格/场景/示例对话）。 */
+    private void editCharacterInfo() {
+        LinearLayout box = MiuixUi.vertical(this);
+        EditText descInput = MiuixUi.field(this, "角色描述", false);
+        descInput.setText(character.description);
+        descInput.setMinLines(3);
+        EditText personalityInput = MiuixUi.field(this, "性格", false);
+        personalityInput.setText(character.personality);
+        personalityInput.setMinLines(2);
+        EditText scenarioInput = MiuixUi.field(this, "场景/情境", false);
+        scenarioInput.setText(character.scenario);
+        scenarioInput.setMinLines(2);
+        EditText exampleInput = MiuixUi.field(this, "示例对话", false);
+        exampleInput.setText(character.exampleDialogue);
+        exampleInput.setMinLines(2);
+        box.addView(descInput);
+        box.addView(personalityInput);
+        box.addView(scenarioInput);
+        box.addView(exampleInput);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(box);
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle("编辑角色资料")
+                .setView(scroll)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    character.description = descInput.getText().toString();
+                    character.personality = personalityInput.getText().toString();
+                    character.scenario = scenarioInput.getText().toString();
+                    character.exampleDialogue = exampleInput.getText().toString();
+                    store.upsertCharacter(character);
+                    LocalizedToast.makeText(this, "已保存", Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
+    /** 按字段名编辑单条文本（开场白/角色描述/创作者备注）。 */
+    private void editCharacterText(String title, String field) {
+        String current;
+        if ("firstMessage".equals(field)) current = character.firstMessage;
+        else if ("description".equals(field)) current = character.description;
+        else if ("creatorNotes".equals(field)) current = character.creatorNotes;
+        else return;
+        LinearLayout box = MiuixUi.vertical(this);
+        EditText input = MiuixUi.field(this, title, false);
+        input.setText(current == null ? "" : current);
+        input.setMinLines(3);
+        box.addView(input);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(box);
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle("编辑" + title)
+                .setView(scroll)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    String value = input.getText().toString();
+                    if ("firstMessage".equals(field)) character.firstMessage = value;
+                    else if ("description".equals(field)) character.description = value;
+                    else if ("creatorNotes".equals(field)) character.creatorNotes = value;
+                    store.upsertCharacter(character);
+                    LocalizedToast.makeText(this, "已保存", Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
+    /** 记忆管理：列表查看、手动添加、单条删除、全部清空。 */
+    private void showMemoryManager() {
+        MemoryStore memory = new MemoryStore(store);
+        List<MemoryStore.MemoryItem> items = memory.getAll();
+        LinearLayout box = MiuixUi.vertical(this);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(box);
+        if (items.isEmpty()) {
+            box.addView(MiuixUi.text(this,
+                    "暂无记忆。正常聊天后会在后台自动总结事实存入这里。",
+                    14, MiuixUi.TEXT_SECONDARY, false));
+        } else {
+            for (MemoryStore.MemoryItem item : items) {
+                TextView row = MiuixUi.text(this, "· " + item.text,
+                        14, MiuixUi.TEXT_PRIMARY, false);
+                row.setPadding(0, MiuixUi.dp(this, 7), 0, MiuixUi.dp(this, 7));
+                row.setClickable(true);
+                row.setFocusable(true);
+                row.setOnClickListener(v -> {
+                    new LocalizedAlertDialogBuilder(this)
+                            .setTitle("删除这条记忆？")
+                            .setMessage(item.text)
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("删除", (d, w) -> {
+                                memory.deleteById(item.id);
+                                LocalizedToast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
+                            })
+                            .show();
+                });
+                box.addView(row);
+            }
+        }
+        AlertDialog dialog = new LocalizedAlertDialogBuilder(this)
+                .setTitle("记忆（" + items.size() + " 条）")
+                .setView(scroll)
+                .setNeutralButton("添加", null)
+                .setNegativeButton("清空全部", null)
+                .setPositiveButton("完成", null)
+                .show();
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            LinearLayout addBox = MiuixUi.vertical(this);
+            EditText addInput = MiuixUi.field(this, "记忆内容", false);
+            addInput.setMinLines(2);
+            addBox.addView(addInput);
+            new LocalizedAlertDialogBuilder(this)
+                    .setTitle("手动添加记忆")
+                    .setView(addBox)
+                    .setNegativeButton("取消", null)
+                    .setPositiveButton("添加", (d, w) -> {
+                        String text = addInput.getText().toString().trim();
+                        if (!text.isEmpty()) {
+                            memory.addManual(text);
+                            dialog.dismiss();
+                            showMemoryManager();
+                        }
+                    })
+                    .show();
+        });
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+            new LocalizedAlertDialogBuilder(this)
+                    .setTitle("清空全部记忆？")
+                    .setMessage("共 " + memory.count() + " 条，不可恢复。")
+                    .setNegativeButton("取消", null)
+                    .setPositiveButton("清空", (d, w) -> {
+                        memory.clearAll();
+                        dialog.dismiss();
+                    })
+                    .show();
+        });
     }
 
     private void showText(String title, String value, String fallback) {

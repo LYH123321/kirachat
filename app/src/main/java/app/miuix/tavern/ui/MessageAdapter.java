@@ -13,7 +13,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import app.miuix.tavern.model.CharacterCard;
 import app.miuix.tavern.model.ChatMessage;
-
+import app.miuix.tavern.util.TavernRegex;
 import java.util.List;
 
 public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Holder> {
@@ -21,13 +21,14 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Ho
         void onMessageLongPress(ChatMessage message, int position, View anchor);
         void onAvatarClick(CharacterCard character);
     }
-
     private final Context context;
     private final CharacterCard character;
     private final CharacterCard persona;
     private final Listener listener;
     private final int maxBubbleWidth;
     private List<ChatMessage> messages;
+    /** display 时机正则脚本（由 ChatActivity 注入，可空）。 */
+    public List<TavernRegex.Script> displayScripts;
 
     public MessageAdapter(Context context, CharacterCard character, String personaName,
                           String personaAvatarPath, List<ChatMessage> messages,
@@ -99,7 +100,19 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Ho
     @Override
     public void onBindViewHolder(@NonNull Holder holder, int position) {
         ChatMessage message = messages.get(position);
-        holder.bubble.bind(message);
+        ChatMessage rendered = message;
+        // display 时机正则：只影响渲染，不改历史原文
+        if (displayScripts != null && !displayScripts.isEmpty()
+                && ChatMessage.ASSISTANT.equals(message.role)
+                && message.content != null && !message.failed) {
+            rendered = new ChatMessage(message.role, message.content);
+            rendered.id = message.id;
+            rendered.speaker = message.speaker;
+            rendered.timestamp = message.timestamp;
+            rendered.failed = message.failed;
+            rendered.content = TavernRegex.applyDisplay(displayScripts, message.content);
+        }
+        holder.bubble.bind(rendered);
         if (ChatMessage.ASSISTANT.equals(message.role)) {
             holder.avatar.setOnClickListener(v -> listener.onAvatarClick(character));
             holder.avatar.setContentDescription(

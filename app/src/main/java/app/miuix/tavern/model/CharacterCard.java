@@ -24,6 +24,7 @@ public final class CharacterCard {
     public String avatarPath;
     public String sourceAvatar;
     public String worldBookJson;
+    public String regexScriptsJson;
     public long lastUsed;
     public int unread;
     public boolean muted;
@@ -59,6 +60,7 @@ public final class CharacterCard {
                 .put("avatarPath", avatarPath)
                 .put("sourceAvatar", sourceAvatar)
                 .put("worldBookJson", worldBookJson)
+                .put("regexScriptsJson", regexScriptsJson == null ? "" : regexScriptsJson)
                 .put("lastUsed", lastUsed)
                 .put("unread", unread)
                 .put("muted", muted)
@@ -79,6 +81,7 @@ public final class CharacterCard {
         card.avatarPath = object.optString("avatarPath", "");
         card.sourceAvatar = object.optString("sourceAvatar", "");
         card.worldBookJson = object.optString("worldBookJson", "");
+        card.regexScriptsJson = object.optString("regexScriptsJson", "");
         card.lastUsed = object.optLong("lastUsed", System.currentTimeMillis());
         card.unread = object.optInt("unread", 0);
         card.muted = object.optBoolean("muted", false);
@@ -103,6 +106,17 @@ public final class CharacterCard {
 
         JSONObject book = source.optJSONObject("character_book");
         if (book != null) card.worldBookJson = book.toString();
+        try {
+            JSONArray regex = source.optJSONArray("regex_scripts");
+            if (regex == null) {
+                JSONObject ext = source.optJSONObject("extensions");
+                if (ext != null) regex = ext.optJSONArray("regex_scripts");
+            }
+            if (regex != null && regex.length() > 0) {
+                card.regexScriptsJson = regex.toString();
+            }
+        } catch (Exception ignored) {
+        }
         return card;
     }
 

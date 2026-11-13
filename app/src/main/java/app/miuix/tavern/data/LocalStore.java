@@ -149,6 +149,81 @@ public final class LocalStore {
         return validMembers;
     }
 
+    // ---- 扩展：原始键值读写（供世界书/记忆等扩展模块使用） ----
+
+    public String getRawPref(String key, String def) {
+        return prefs.getString(key, def);
+    }
+
+    public void putRawPref(String key, String value) {
+        prefs.edit().putString(key, value).apply();
+    }
+
+    /** 角色 ↔ 世界书绑定（一本书可绑多张卡）。 */
+    public static class CharacterLink {
+        public String characterId;
+        public String worldBookId;
+    }
+
+    public synchronized List<CharacterLink> getCharacterLinks() {
+        List<CharacterLink> out = new ArrayList<>();
+        try {
+            JSONArray array = new JSONArray(prefs.getString("character_links", "[]"));
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject o = array.optJSONObject(i);
+                if (o == null) continue;
+                CharacterLink link = new CharacterLink();
+                link.characterId = o.optString("characterId", "");
+                link.worldBookId = o.optString("worldBookId", "");
+                out.add(link);
+            }
+        } catch (Exception ignored) {
+        }
+        return out;
+    }
+
+    public synchronized void upsertCharacterLink(CharacterLink link) {
+        List<CharacterLink> links = getCharacterLinks();
+        for (CharacterLink existing : links) {
+            if (existing.characterId.equals(link.characterId)
+                    && existing.worldBookId.equals(link.worldBookId)) {
+                return; // 已存在
+            }
+        }
+        links.add(link);
+        try {
+            JSONArray array = new JSONArray();
+            for (CharacterLink l : links) {
+                JSONObject o = new JSONObject();
+                o.put("characterId", l.characterId);
+                o.put("worldBookId", l.worldBookId);
+                array.put(o);
+            }
+            prefs.edit().putString("character_links", array.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    public synchronized void removeCharacterLink(String characterId, String worldBookId) {
+        List<CharacterLink> links = getCharacterLinks();
+        List<CharacterLink> remaining = new ArrayList<>();
+        for (CharacterLink l : links) {
+            if (l.characterId.equals(characterId) && l.worldBookId.equals(worldBookId)) continue;
+            remaining.add(l);
+        }
+        try {
+            JSONArray array = new JSONArray();
+            for (CharacterLink l : remaining) {
+                JSONObject o = new JSONObject();
+                o.put("characterId", l.characterId);
+                o.put("worldBookId", l.worldBookId);
+                array.put(o);
+            }
+            prefs.edit().putString("character_links", array.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
     public synchronized List<CharacterCard> getCharacters() {
         List<CharacterCard> cards = new ArrayList<>();
         try {

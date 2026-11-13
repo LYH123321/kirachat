@@ -20,13 +20,16 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import app.miuix.tavern.data.LocalStore;
+import app.miuix.tavern.data.PresetStore;
 import app.miuix.tavern.data.SyncSettings;
+import app.miuix.tavern.data.WorldBookStore;
 import app.miuix.tavern.model.AppConfig;
 import app.miuix.tavern.model.CharacterCard;
 import app.miuix.tavern.model.GroupChat;
@@ -48,6 +51,8 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends AppCompatActivity {
     private static final int IMPORT_CARD = 4102;
     private static final int CHANGE_PERSONA_AVATAR = 4103;
+    private static final int IMPORT_WORLDBOOK = 4112;
+    private static final int IMPORT_PRESET = 4113;
     private static final int[] NAV_TYPES = {
             LineIconView.CHAT, LineIconView.CHARACTER, LineIconView.BOOK, LineIconView.PERSON
     };
@@ -325,25 +330,106 @@ public final class MainActivity extends AppCompatActivity {
         LinearLayout page = MiuixUi.vertical(this);
         scroll.addView(page, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        page.addView(buildHeader("世界书", "按最近对话关键词自动激活", null));
+        page.addView(buildHeader("世界书", "独立导入 · 扫描检索 · 手动新建", null));
 
-        LinearLayout explainer = MiuixUi.card(this);
-        TextView title = MiuixUi.text(this, "安静地补充上下文", 18, MiuixUi.TEXT_PRIMARY, true);
-        explainer.addView(title);
-        TextView body = MiuixUi.text(this,
-                "导入 Tavern V2/V3 角色卡时，内嵌的 character_book 会一并保存。每次生成前只选择命中关键词的条目，避免把整本设定塞进提示词。",
-                14, MiuixUi.TEXT_SECONDARY, false);
-        body.setLineSpacing(MiuixUi.dp(this, 3), 1.05f);
-        LinearLayout.LayoutParams bodyParams =
-                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        bodyParams.topMargin = MiuixUi.dp(this, 9);
-        explainer.addView(body, bodyParams);
-        addWithPageMargins(page, explainer, 0, 12);
+        // ── 操作按钮区：导入 / 扫描 / 新建 / 预设 ──
+        LinearLayout actions = MiuixUi.card(this);
+        LinearLayout actionRow = MiuixUi.horizontal(this);
+        actions.addView(actionRow);
+        TextView importBtn = MiuixUi.pillButton(this, "导入 JSON", true);
+        importBtn.setOnClickListener(v -> importWorldBookJson());
+        actionRow.addView(importBtn, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView scanBtn = MiuixUi.pillButton(this, "扫描存储", false);
+        scanBtn.setOnClickListener(v -> showScannerDialog());
+        LinearLayout.LayoutParams scanParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        scanParams.leftMargin = MiuixUi.dp(this, 8);
+        actionRow.addView(scanBtn, scanParams);
+        TextView newBookBtn = MiuixUi.pillButton(this, "新建书", false);
+        newBookBtn.setOnClickListener(v -> showNewBookDialog());
+        LinearLayout.LayoutParams newBookParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        newBookParams.leftMargin = MiuixUi.dp(this, 8);
+        actionRow.addView(newBookBtn, newBookParams);
+        addWithPageMargins(page, actions, 0, 12);
 
-        int books = 0;
+        // ── 预设管理区 ──
+        LinearLayout presetCard = MiuixUi.card(this);
+        PresetStore presetStore = new PresetStore();
+        List<PresetStore.Preset> presets = presetStore.getPresets(store);
+        PresetStore.Preset active = presetStore.activePreset(store);
+        String presetSummary = presets.isEmpty()
+                ? "尚未导入预设（SillyTavern 预设 JSON）"
+                : (active == null
+                        ? presets.size() + " 个预设，均未启用"
+                        : "已启用：" + active.name + "（" + active.prompts.size() + " 条）");
+        presetCard.addView(MiuixUi.text(this, "预设注入", 17, MiuixUi.TEXT_PRIMARY, true));
+        TextView presetBody = MiuixUi.text(this, presetSummary, 13,
+                MiuixUi.TEXT_SECONDARY, false);
+        LinearLayout.LayoutParams presetBodyParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        presetBodyParams.topMargin = MiuixUi.dp(this, 5);
+        presetCard.addView(presetBody, presetBodyParams);
+        LinearLayout presetRow = MiuixUi.horizontal(this);
+        TextView presetImport = MiuixUi.pillButton(this, "导入预设", true);
+        presetImport.setOnClickListener(v -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            startActivityForResult(intent, IMPORT_PRESET);
+        });
+        presetRow.addView(presetImport, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView presetManage = MiuixUi.pillButton(this, "管理", false);
+        presetManage.setOnClickListener(v -> showPresetManager());
+        LinearLayout.LayoutParams presetManageParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        presetManageParams.leftMargin = MiuixUi.dp(this, 8);
+        presetRow.addView(presetManage, presetManageParams);
+        LinearLayout.LayoutParams presetRowParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        presetRowParams.topMargin = MiuixUi.dp(this, 10);
+        presetCard.addView(presetRow, presetRowParams);
+        addWithPageMargins(page, presetCard, 0, 10);
+
+        // ── 独立世界书列表 ──
+        WorldBookStore bookStore = new WorldBookStore(store);
+        List<WorldBookStore.Book> books = bookStore.getBooks();
+        for (WorldBookStore.Book book : books) {
+            LinearLayout item = MiuixUi.card(this);
+            LinearLayout row = MiuixUi.horizontal(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            item.addView(row);
+            LinearLayout labels = MiuixUi.vertical(this);
+            LinearLayout.LayoutParams labelsParams =
+                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+            row.addView(labels, labelsParams);
+            labels.addView(MiuixUi.rawText(this, book.name, 17, MiuixUi.TEXT_PRIMARY, true));
+            labels.addView(MiuixUi.text(this,
+                    book.enabledCount() + "/" + book.entries.size() + " 条启用 · 长按管理",
+                    13, MiuixUi.TEXT_SECONDARY, false));
+            TextView status = MiuixUi.text(this, book.enabled ? "已启用" : "已停用", 12,
+                    book.enabled ? MiuixUi.GREEN : MiuixUi.TEXT_SECONDARY, true);
+            status.setGravity(Gravity.CENTER);
+            status.setBackground(MiuixUi.shape(book.enabled
+                    ? Color.rgb(233, 249, 240) : Color.rgb(235, 235, 238), 12, this));
+            status.setPadding(MiuixUi.dp(this, 10), 0, MiuixUi.dp(this, 10), 0);
+            row.addView(status, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, MiuixUi.dp(this, 26)));
+            item.setOnClickListener(v -> showBookDetail(book.id));
+            item.setOnLongClickListener(v -> {
+                showBookManager(book.id);
+                return true;
+            });
+            addWithPageMargins(page, item, 0, 10);
+        }
+
+        // ── 角色卡内嵌世界书（原有展示保留） ──
+        int embedded = 0;
         for (CharacterCard card : store.getCharacters()) {
             if (card.loreEntryCount() <= 0) continue;
-            books++;
+            embedded++;
             LinearLayout item = MiuixUi.card(this);
             LinearLayout row = MiuixUi.horizontal(this);
             item.addView(row);
@@ -357,7 +443,7 @@ public final class MainActivity extends AppCompatActivity {
             row.addView(labels, labelsParams);
             labels.addView(MiuixUi.rawText(
                     this, card.name, 17, MiuixUi.TEXT_PRIMARY, true));
-            labels.addView(MiuixUi.text(this, card.loreEntryCount() + " 条可触发设定",
+            labels.addView(MiuixUi.text(this, card.loreEntryCount() + " 条内嵌设定",
                     13, MiuixUi.TEXT_SECONDARY, false));
             TextView status = MiuixUi.text(this, "已启用", 12, MiuixUi.GREEN, true);
             status.setGravity(Gravity.CENTER);
@@ -367,14 +453,477 @@ public final class MainActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.WRAP_CONTENT, MiuixUi.dp(this, 26)));
             addWithPageMargins(page, item, 0, 10);
         }
-        if (books == 0) {
-            TextView empty = MiuixUi.text(this, "还没有带世界书的角色卡", 15, MiuixUi.TEXT_SECONDARY, false);
+        if (books.isEmpty() && embedded == 0) {
+            TextView empty = MiuixUi.text(this,
+                    "还没有世界书。点上方「导入 JSON / 扫描存储 / 新建书」开始",
+                    15, MiuixUi.TEXT_SECONDARY, false);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, MiuixUi.dp(this, 28), 0, MiuixUi.dp(this, 28));
             page.addView(empty);
         }
         return scroll;
     }
+
+    /** 导入独立世界书 JSON（SillyTavern world book 格式）。 */
+    private void importWorldBookJson() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, IMPORT_WORLDBOOK);
+    }
+
+    /** rg 式全盘扫描：递归扫 /sdcard 找世界书/角色卡/预设 JSON。 */
+    private void showScannerDialog() {
+        LinearLayout box = MiuixUi.vertical(this);
+        EditText pathInput = MiuixUi.field(this, "扫描目录（默认 /sdcard/Download/st）", false);
+        pathInput.setText("/sdcard/Download/st");
+        box.addView(pathInput);
+        TextView progress = MiuixUi.text(this, "", 13, MiuixUi.TEXT_SECONDARY, false);
+        box.addView(progress);
+        AlertDialog dialog = new LocalizedAlertDialogBuilder(this)
+                .setTitle("扫描酒馆资产")
+                .setView(box)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("开始扫描", null)
+                .show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String dir = pathInput.getText().toString().trim();
+            if (dir.isEmpty()) dir = "/sdcard/Download/st";
+            progress.setText("扫描中…");
+            final String root = dir;
+            io.execute(() -> {
+                List<String> worldBooks = new ArrayList<>();
+                List<String> cards = new ArrayList<>();
+                List<String> presetFiles = new ArrayList<>();
+                scanDirectory(new java.io.File(root), worldBooks, cards, presetFiles, 0);
+                runOnUiThread(() -> showScanResults(root, worldBooks, cards, presetFiles, dialog));
+            });
+        });
+    }
+
+    private void scanDirectory(java.io.File dir, List<String> worldBooks,
+                               List<String> cards, List<String> presetFiles, int depth) {
+        if (dir == null || !dir.isDirectory() || depth > 6) return;
+        java.io.File[] children = dir.listFiles();
+        if (children == null) return;
+        for (java.io.File child : children) {
+            if (child.isDirectory()) {
+                scanDirectory(child, worldBooks, cards, presetFiles, depth + 1);
+            } else if (child.isFile() && child.getName().toLowerCase(Locale.ROOT).endsWith(".json")) {
+                String path = child.getAbsolutePath();
+                String lower = path.toLowerCase(Locale.ROOT);
+                if (lower.contains("preset") || lower.contains("预设")) {
+                    presetFiles.add(path);
+                }
+                worldBooks.add(path);
+                cards.add(path);
+            }
+        }
+    }
+
+    /** 展示扫描结果：逐文件嗅探内容分类，点选导入。 */
+    private void showScanResults(String root, List<String> candidates,
+                                 List<String> unusedCards, List<String> presetFiles,
+                                 AlertDialog scanDialog) {
+        scanDialog.dismiss();
+        List<String> books = new ArrayList<>();
+        List<String> presets = new ArrayList<>();
+        List<String> cards = new ArrayList<>();
+        List<String> unknown = new ArrayList<>();
+        for (String path : candidates) {
+            String kind = sniffJsonKind(path);
+            if ("world".equals(kind)) books.add(path);
+            else if ("preset".equals(kind)) presets.add(path);
+            else if ("card".equals(kind)) cards.add(path);
+            else unknown.add(path);
+        }
+        for (String path : presetFiles) {
+            if (!presets.contains(path) && "preset".equals(sniffJsonKind(path))) presets.add(path);
+        }
+        LinearLayout box = MiuixUi.vertical(this);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(box);
+        TextView summary = MiuixUi.text(this,
+                "扫描 " + root + "：世界书 " + books.size() + "，预设 " + presets.size()
+                        + "，角色卡 " + cards.size(),
+                14, MiuixUi.TEXT_PRIMARY, true);
+        box.addView(summary, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        java.util.Map<String, java.util.List<String>> groups = new java.util.LinkedHashMap<>();
+        groups.put("世界书", books);
+        groups.put("预设", presets);
+        groups.put("角色卡", cards);
+        for (java.util.Map.Entry<String, java.util.List<String>> group : groups.entrySet()) {
+            box.addView(MiuixUi.text(this, group.getKey(), 15, MiuixUi.TEXT_PRIMARY, true));
+            if (group.getValue().isEmpty()) {
+                box.addView(MiuixUi.text(this, "（无）", 13, MiuixUi.TEXT_SECONDARY, false));
+                continue;
+            }
+            for (String path : group.getValue()) {
+                java.io.File f = new java.io.File(path);
+                TextView row = MiuixUi.text(this,
+                        "· " + f.getName() + "（" + (f.length() / 1024) + "KB）",
+                        13, MiuixUi.TEXT_SECONDARY, false);
+                row.setClickable(true);
+                row.setFocusable(true);
+                row.setOnClickListener(v -> {
+                    if ("世界书".equals(group.getKey())) importWorldBookFromPath(path);
+                    else if ("预设".equals(group.getKey())) importPresetFromPath(path);
+                    else importCharacterFromPath(path);
+                });
+                box.addView(row);
+            }
+        }
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle("扫描结果")
+                .setView(scroll)
+                .setPositiveButton("完成", null)
+                .show();
+    }
+
+    /** 读 JSON 头部嗅探类型：world book / preset / character card。 */
+    private String sniffJsonKind(String path) {
+        try (InputStream input = new java.io.FileInputStream(path)) {
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            int n;
+            int total = 0;
+            while ((n = input.read(chunk)) > 0 && total < 65536) {
+                buffer.write(chunk, 0, n);
+                total += n;
+            }
+            String head = buffer.toString("UTF-8");
+            // 角色卡优先判定（卡内可含 character_book，避免误判成独立世界书）
+            if (head.contains("\"first_mes\"") || head.contains("\"character_book\"")
+                    || head.contains("\"chara\"") || head.contains("\"spec_v2\"")
+                    || head.contains("\"spec\":\"chara_card_v2\"")) {
+                return "card";
+            }
+            if (head.contains("\"prompt_order\"") && head.contains("\"prompts\"")) {
+                return "preset";
+            }
+            if (head.contains("\"entries\"") && (head.contains("\"keys\"")
+                    || head.contains("\"key\"") || head.contains("\"content\""))) {
+                return "world";
+            }
+        } catch (Exception ignored) {
+        }
+        return "unknown";
+    }
+
+    private void importWorldBookFromPath(String path) {
+        io.execute(() -> {
+            try (InputStream input = new java.io.FileInputStream(path)) {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] chunk = new byte[8192];
+                int n;
+                while ((n = input.read(chunk)) > 0) buffer.write(chunk, 0, n);
+                String json = buffer.toString("UTF-8");
+                String fileName = new java.io.File(path).getName();
+                WorldBookStore.Book book = WorldBookStore.parseWorldBookJson(
+                        json, fileName.replaceAll("(?i)\\.json$", ""));
+                runOnUiThread(() -> {
+                    if (book == null) {
+                        LocalizedToast.makeText(this, "不是有效的世界书 JSON",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    new WorldBookStore(store).upsertBook(book);
+                    LocalizedToast.makeText(this,
+                            "已导入：" + book.name + "（" + book.entries.size() + " 条）",
+                            Toast.LENGTH_LONG).show();
+                    showTab(2);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> LocalizedToast.makeText(this,
+                        "导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void importPresetFromPath(String path) {
+        io.execute(() -> {
+            try (InputStream input = new java.io.FileInputStream(path)) {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] chunk = new byte[8192];
+                int n;
+                while ((n = input.read(chunk)) > 0) buffer.write(chunk, 0, n);
+                String json = buffer.toString("UTF-8");
+                String fileName = new java.io.File(path).getName();
+                PresetStore.Preset preset = PresetStore.parse(
+                        json, fileName.replaceAll("(?i)\\.json$", ""));
+                runOnUiThread(() -> {
+                    if (preset == null) {
+                        LocalizedToast.makeText(this, "不是有效的预设 JSON",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    preset.enabled = true;
+                    new PresetStore().upsertPreset(store, preset);
+                    LocalizedToast.makeText(this,
+                            "已导入并启用预设：" + preset.name, Toast.LENGTH_LONG).show();
+                    showTab(2);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> LocalizedToast.makeText(this,
+                        "导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void importCharacterFromPath(String path) {
+        try (InputStream input = new java.io.FileInputStream(path)) {
+            CharacterCardImporter.Result result = CharacterCardImporter.parse(input);
+            chooseCharacterImportMode(result);
+        } catch (Exception e) {
+            LocalizedToast.makeText(this, "导入失败：" + e.getMessage(),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** 新建世界书。 */
+    private void showNewBookDialog() {
+        EditText nameInput = MiuixUi.field(this, "世界书名称", false);
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle("新建世界书")
+                .setView(nameInput)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("创建", (dialog, which) -> {
+                    String name = nameInput.getText().toString().trim();
+                    if (name.isEmpty()) return;
+                    WorldBookStore.Book book = new WorldBookStore.Book();
+                    book.id = java.util.UUID.randomUUID().toString();
+                    book.name = name;
+                    new WorldBookStore(store).upsertBook(book);
+                    showTab(2);
+                })
+                .show();
+    }
+
+    /** 书详情 + 条目列表（点条目可编辑，底部可加新条目）。 */
+    private void showBookDetail(String bookId) {
+        WorldBookStore bookStore = new WorldBookStore(store);
+        WorldBookStore.Book book = bookStore.getBook(bookId);
+        if (book == null) return;
+        LinearLayout box = MiuixUi.vertical(this);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(box);
+        for (WorldBookStore.Entry entry : book.entries) {
+            TextView row = MiuixUi.text(this,
+                    (entry.enabled ? "● " : "○ ") + entry.keysDisplay()
+                            + (entry.comment.isEmpty() ? "" : " ｜ " + entry.comment),
+                    14, entry.enabled ? MiuixUi.TEXT_PRIMARY : MiuixUi.TEXT_SECONDARY, false);
+            row.setPadding(0, MiuixUi.dp(this, 8), 0, MiuixUi.dp(this, 8));
+            row.setClickable(true);
+            row.setFocusable(true);
+            row.setOnClickListener(v -> showEntryEditor(book.id, entry.id, null));
+            box.addView(row);
+        }
+        if (book.entries.isEmpty()) {
+            box.addView(MiuixUi.text(this, "空书，返回后长按可添加条目",
+                    13, MiuixUi.TEXT_SECONDARY, false));
+        }
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle(book.name + "（" + book.enabledCount() + "/" + book.entries.size() + "）")
+                .setView(scroll)
+                .setPositiveButton("完成", null)
+                .show();
+    }
+
+    /** 书管理：增条目 / 绑角色 / 删书 / 清空。 */
+    private void showBookManager(String bookId) {
+        WorldBookStore bookStore = new WorldBookStore(store);
+        WorldBookStore.Book book = bookStore.getBook(bookId);
+        if (book == null) return;
+        String[] options = {"添加条目", "绑定到角色卡", book.enabled ? "停用此书" : "启用此书", "删除此书"};
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle(book.name)
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        showEntryEditor(book.id, null, null);
+                    } else if (which == 1) {
+                        showBookBindDialog(book.id);
+                    } else if (which == 2) {
+                        book.enabled = !book.enabled;
+                        bookStore.upsertBook(book);
+                        showTab(2);
+                    } else if (which == 3) {
+                        bookStore.deleteBook(book.id);
+                        showTab(2);
+                    }
+                })
+                .show();
+    }
+
+    /** 把书绑定到角色卡（多选）。 */
+    private void showBookBindDialog(String bookId) {
+        WorldBookStore bookStore = new WorldBookStore(store);
+        WorldBookStore.Book book = bookStore.getBook(bookId);
+        if (book == null) return;
+        List<CharacterCard> cards = store.getCharacters();
+        if (cards.isEmpty()) {
+            LocalizedToast.makeText(this, "还没有角色卡", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        List<LocalStore.CharacterLink> links = store.getCharacterLinks();
+        List<String> boundIds = new ArrayList<>();
+        for (LocalStore.CharacterLink link : links) {
+            if (bookId.equals(link.worldBookId)) boundIds.add(link.characterId);
+        }
+        CharSequence[] names = new CharSequence[cards.size()];
+        boolean[] checked = new boolean[cards.size()];
+        for (int i = 0; i < cards.size(); i++) {
+            names[i] = cards.get(i).name;
+            checked[i] = boundIds.contains(cards.get(i).id);
+        }
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle("把「" + book.name + "」绑定到角色")
+                .setMultiChoiceItems(names, checked, (dialog, which, isChecked) -> { })
+                .setPositiveButton("保存", (dialog, which) -> {
+                    for (int i = 0; i < cards.size(); i++) {
+                        String cardId = cards.get(i).id;
+                        boolean bound = boundIds.contains(cardId);
+                        if (checked[i] && !bound) {
+                            LocalStore.CharacterLink link = new LocalStore.CharacterLink();
+                            link.characterId = cardId;
+                            link.worldBookId = bookId;
+                            store.upsertCharacterLink(link);
+                        }
+                        if (!checked[i] && bound) store.removeCharacterLink(cardId, bookId);
+                    }
+                    LocalizedToast.makeText(this, "绑定已保存", Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
+    /** 条目编辑器：新建（entryId=null）或编辑现有条目。 */
+    private void showEntryEditor(String bookId, @Nullable String entryId, @Nullable Void unused) {
+        WorldBookStore bookStore = new WorldBookStore(store);
+        WorldBookStore.Book book = bookStore.getBook(bookId);
+        if (book == null) return;
+        WorldBookStore.Entry entry = null;
+        if (entryId != null) {
+            for (WorldBookStore.Entry e : book.entries) {
+                if (e.id.equals(entryId)) {
+                    entry = e;
+                    break;
+                }
+            }
+        }
+        WorldBookStore.Entry target = entry != null ? entry : new WorldBookStore.Entry();
+        LinearLayout box = MiuixUi.vertical(this);
+        EditText keysInput = MiuixUi.field(this, "关键词（逗号分隔）", false);
+        keysInput.setText(target.keys);
+        EditText contentInput = MiuixUi.field(this, "条目内容", false);
+        contentInput.setText(target.content);
+        contentInput.setMinLines(3);
+        EditText commentInput = MiuixUi.field(this, "备注（可选）", false);
+        commentInput.setText(target.comment);
+        box.addView(keysInput);
+        box.addView(contentInput);
+        box.addView(commentInput);
+        AlertDialog dialog = new LocalizedAlertDialogBuilder(this)
+                .setTitle(entry == null ? "添加条目" : "编辑条目")
+                .setView(box)
+                .setNeutralButton("删除", null)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", null)
+                .show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String keys = keysInput.getText().toString().trim();
+            String content = contentInput.getText().toString().trim();
+            if (keys.isEmpty() && content.isEmpty()) return;
+            if (entry == null) {
+                WorldBookStore.Entry created = new WorldBookStore.Entry();
+                created.id = java.util.UUID.randomUUID().toString();
+                created.bookId = bookId;
+                created.keys = keys;
+                created.content = content;
+                created.comment = commentInput.getText().toString().trim();
+                created.constant = keys.isEmpty();
+                created.enabled = true;
+                book.entries.add(created);
+            } else {
+                entry.keys = keys;
+                entry.content = content;
+                entry.comment = commentInput.getText().toString().trim();
+            }
+            bookStore.upsertBook(book);
+            dialog.dismiss();
+            showTab(2);
+        });
+        View deleteBtn = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+        if (entry == null) {
+            deleteBtn.setVisibility(View.GONE);
+        } else {
+            deleteBtn.setOnClickListener(v2 -> {
+                book.entries.remove(entry);
+                bookStore.upsertBook(book);
+                dialog.dismiss();
+                showTab(2);
+            });
+        }
+    }
+
+    /** 预设管理：切换启用 / 删除。 */
+    private void showPresetManager() {
+        PresetStore presetStore = new PresetStore();
+        List<PresetStore.Preset> presets = presetStore.getPresets(store);
+        if (presets.isEmpty()) {
+            LocalizedToast.makeText(this, "还没有预设", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        PresetStore.Preset active = presetStore.activePreset(store);
+        String[] names = new String[presets.size()];
+        for (int i = 0; i < presets.size(); i++) {
+            PresetStore.Preset p = presets.get(i);
+            int enabledCount = 0;
+            for (PresetStore.PresetPrompt pp : p.prompts) {
+                if (pp.enabled) enabledCount++;
+            }
+            names[i] = (p == active ? "✓ " : "") + p.name
+                    + "（" + enabledCount + "/" + p.prompts.size() + " 条启用）"
+                    + (p.enabled ? "" : " [整体停用]");
+        }
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle("预设管理")
+                .setItems(names, (dialog, which) -> showPresetDetail(presetStore, presets.get(which)))
+                .show();
+    }
+
+    private void showPresetDetail(PresetStore presetStore, PresetStore.Preset preset) {
+        String[] options = {
+                preset.enabled ? "整体停用" : "设为启用（生效）",
+                "查看 prompt 列表",
+                "删除此预设"
+        };
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle(preset.name)
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        preset.enabled = !preset.enabled;
+                        presetStore.upsertPreset(store, preset);
+                        showTab(2);
+                    } else if (which == 1) {
+                        StringBuilder detail = new StringBuilder();
+                        for (PresetStore.PresetPrompt pp : preset.prompts) {
+                            detail.append(pp.enabled ? "● " : "○ ")
+                                    .append(pp.name)
+                                    .append(" [").append(pp.role).append("]\n");
+                        }
+                        new LocalizedAlertDialogBuilder(this)
+                                .setTitle(preset.name)
+                                .setMessage(detail.toString())
+                                .setPositiveButton("完成", null)
+                                .show();
+                    } else if (which == 2) {
+                        presetStore.deletePreset(store, preset.id);
+                        showTab(2);
+                    }
+                })
+                .show();
+    }
+
 
     private View buildProfilePage() {
         ScrollView scroll = new ScrollView(this);
@@ -615,15 +1164,69 @@ public final class MainActivity extends AppCompatActivity {
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add(0, 1, 0, L10n.tr(this, "创建群聊"));
         menu.getMenu().add(0, 2, 1, L10n.tr(this, "添加角色"));
+        menu.getMenu().add(0, 3, 2, L10n.tr(this, "手动新建角色"));
         menu.setOnMenuItemClickListener(item -> {
             if (item.getItemId() == 1) {
                 startActivity(new Intent(this, CreateGroupActivity.class));
             } else if (item.getItemId() == 2) {
                 importCharacter();
+            } else if (item.getItemId() == 3) {
+                showManualCharacterCreator();
             }
             return true;
         });
         menu.show();
+    }
+
+    /** 手动新建角色：填基本信息即建卡，保存后可直接开聊。 */
+    private void showManualCharacterCreator() {
+        LinearLayout box = MiuixUi.vertical(this);
+        final AlertDialog[] holder = new AlertDialog[1];
+        EditText nameInput = MiuixUi.field(this, "角色名（必填）", false);
+        EditText descInput = MiuixUi.field(this, "角色描述", false);
+        descInput.setMinLines(3);
+        EditText personaInput = MiuixUi.field(this, "性格", false);
+        EditText scenarioInput = MiuixUi.field(this, "场景/情境", false);
+        EditText greetingInput = MiuixUi.field(this, "开场白（可选）", false);
+        greetingInput.setMinLines(2);
+        box.addView(nameInput);
+        box.addView(descInput);
+        box.addView(personaInput);
+        box.addView(scenarioInput);
+        box.addView(greetingInput);
+        AlertDialog dialog = new LocalizedAlertDialogBuilder(this)
+                .setTitle("手动新建角色")
+                .setView(box)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("创建并聊天", null)
+                .show();
+        holder[0] = dialog;
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String name = nameInput.getText().toString().trim();
+            if (name.isEmpty()) {
+                LocalizedToast.makeText(this, "角色名不能为空", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            for (CharacterCard card : store.getCharacters()) {
+                if (name.equalsIgnoreCase(card.name == null ? "" : card.name.trim())) {
+                    LocalizedToast.makeText(this, "已有同名角色，请换个名字", Toast.LENGTH_LONG).show();
+                    return;
+                }
+            }
+            CharacterCard card = new CharacterCard();
+            card.name = name;
+            card.description = descInput.getText().toString().trim();
+            card.personality = personaInput.getText().toString().trim();
+            card.scenario = scenarioInput.getText().toString().trim();
+            card.firstMessage = greetingInput.getText().toString().trim();
+            store.upsertCharacter(card);
+            dialog.dismiss();
+            LocalizedToast.makeText(this, "已创建：" + name, Toast.LENGTH_SHORT).show();
+            store.touchCharacter(card.id);
+            Intent chatIntent = new Intent(this, ChatActivity.class);
+            chatIntent.putExtra(ChatActivity.EXTRA_CHARACTER_ID, card.id);
+            MiuixUi.startConversationActivity(this, chatIntent);
+        });
     }
 
     private void openCharacterProfile(CharacterCard card) {
@@ -650,6 +1253,69 @@ public final class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == IMPORT_WORLDBOOK || requestCode == IMPORT_PRESET) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+            Uri uri = data.getData();
+            if (requestCode == IMPORT_WORLDBOOK) {
+                io.execute(() -> {
+                    try (InputStream input = getContentResolver().openInputStream(uri)) {
+                        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                        byte[] chunk = new byte[8192];
+                        int n;
+                        while (input != null && (n = input.read(chunk)) > 0) {
+                            buffer.write(chunk, 0, n);
+                        }
+                        String json = buffer.toString("UTF-8");
+                        WorldBookStore.Book book = WorldBookStore.parseWorldBookJson(
+                                json, "导入世界书");
+                        runOnUiThread(() -> {
+                            if (book == null) {
+                                LocalizedToast.makeText(this, "不是有效的世界书 JSON",
+                                        Toast.LENGTH_LONG).show();
+                                return;
+                            }
+                            new WorldBookStore(store).upsertBook(book);
+                            LocalizedToast.makeText(this,
+                                    "已导入：" + book.name + "（" + book.entries.size() + " 条）",
+                                    Toast.LENGTH_LONG).show();
+                            showTab(2);
+                        });
+                    } catch (Exception e) {
+                        runOnUiThread(() -> LocalizedToast.makeText(this,
+                                "导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show());
+                    }
+                });
+            } else {
+                io.execute(() -> {
+                    try (InputStream input = getContentResolver().openInputStream(uri)) {
+                        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                        byte[] chunk = new byte[8192];
+                        int n;
+                        while (input != null && (n = input.read(chunk)) > 0) {
+                            buffer.write(chunk, 0, n);
+                        }
+                        String json = buffer.toString("UTF-8");
+                        PresetStore.Preset preset = PresetStore.parse(json, "导入预设");
+                        runOnUiThread(() -> {
+                            if (preset == null) {
+                                LocalizedToast.makeText(this, "不是有效的预设 JSON",
+                                        Toast.LENGTH_LONG).show();
+                                return;
+                            }
+                            preset.enabled = true;
+                            new PresetStore().upsertPreset(store, preset);
+                            LocalizedToast.makeText(this,
+                                    "已导入并启用预设：" + preset.name, Toast.LENGTH_LONG).show();
+                            showTab(2);
+                        });
+                    } catch (Exception e) {
+                        runOnUiThread(() -> LocalizedToast.makeText(this,
+                                "导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show());
+                    }
+                });
+            }
+            return;
+        }
         if ((requestCode != IMPORT_CARD && requestCode != CHANGE_PERSONA_AVATAR)
                 || resultCode != RESULT_OK
                 || data == null

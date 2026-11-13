@@ -39,7 +39,10 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import app.miuix.tavern.data.LocalStore;
+import app.miuix.tavern.data.MemoryStore;
+import app.miuix.tavern.data.PresetStore;
 import app.miuix.tavern.data.SecureStore;
+import app.miuix.tavern.data.WorldBookStore;
 import app.miuix.tavern.model.AppConfig;
 import app.miuix.tavern.model.CharacterCard;
 import app.miuix.tavern.model.ChatMessage;
@@ -48,7 +51,7 @@ import app.miuix.tavern.util.ChatNotificationManager;
 import app.miuix.tavern.util.LocationLocator;
 import app.miuix.tavern.util.MediaAttachmentStore;
 import app.miuix.tavern.util.PromptBuilder;
-
+import app.miuix.tavern.util.TavernRegex;
 import org.json.JSONArray;
 
 import java.util.ArrayList;
@@ -80,6 +83,9 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
     private File pendingCameraFile;
     private ApiClient.Call activeCall;
     private boolean generating;
+    private WorldBookStore worldBookStore;
+    private List<TavernRegex.Script> displayScripts = new ArrayList<>();
+    private boolean memoryExtracting;
     private boolean chatVisible;
     private int assistantIndex = -1;
     private int assistantInsertIndex = -1;
@@ -110,6 +116,7 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
 
         store = new LocalStore(this);
         secureStore = new SecureStore(this);
+        worldBookStore = new WorldBookStore(store);
         String id = getIntent().getStringExtra(EXTRA_CHARACTER_ID);
         character = store.getCharacter(id == null ? "" : id);
         if (character == null) {
@@ -117,6 +124,7 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
             finish();
             return;
         }
+        displayScripts = TavernRegex.fromCardJson(character.regexScriptsJson);
         messages = new ArrayList<>(store.getMessages(character.id));
         if (messages.isEmpty() && character.firstMessage != null && !character.firstMessage.trim().isEmpty()) {
             messages.add(new ChatMessage(ChatMessage.ASSISTANT,
@@ -126,6 +134,9 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
         setContentView(buildContent());
         ChatNotificationManager.prepare(this);
         recycler.post(() -> scrollToBottom(false));
+        if (adapter != null && !displayScripts.isEmpty()) {
+            adapter.displayScripts = displayScripts;
+        }
         String messageId = getIntent().getStringExtra(EXTRA_MESSAGE_ID);
         if (!TextUtils.isEmpty(messageId)) {
             recycler.post(() -> scrollToMessage(messageId));
@@ -155,6 +166,7 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
         adapter = new MessageAdapter(
                 this, character, store.getConfig().persona,
                 store.getConfig().personaAvatarPath, messages, this);
+        adapter.displayScripts = displayScripts;
         recycler.setAdapter(adapter);
         content.addView(recycler, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
@@ -342,7 +354,7 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
         updateSendButton();
 
         JSONArray prompt = PromptBuilder.build(character, config,
-                new ArrayList<>(messages), spontaneous);
+                new ArrayList<>(messages), spontaneous, buildExtras(config));
         activeCall = ApiClient.generate(this, config, secureStore,
                 secureStore.getDirectApiKey(),
                 prompt, new ApiClient.StreamCallback() {
@@ -361,6 +373,23 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
                         runOnUiThread(() -> finishGeneration(epoch, message));
                     }
                 });
+    }
+
+    /** 汇总预设注入、独立世界书命中、记忆注入与 prompt 层正则脚本。 */
+    private PromptBuilder.BuildExtras buildExtras(AppConfig config) {
+        PromptBuilder.BuildExtras extras = new PromptBuilder.BuildExtras();
+        PresetStore.Preset preset = new PresetStore().activePreset(store);
+        if (preset != null) {
+            extras.presetMessages = PresetStore.buildPresetMessages(
+                    preset, character.name, config.persona);
+        }
+        extras.worldBookLore = PromptBuilder.loreFromExtraBooks(
+                store, character.id, new ArrayList<>(messages),
+                PromptBuilder.localizedPersona(config));
+        MemoryStore memory = new MemoryStore(store);
+        extras.memoryInjection = memory.buildInjection();
+        extras.promptScripts = TavernRegex.fromCardJson(character.regexScriptsJson);
+        return extras;
     }
 
     private void appendDelta(long epoch, String delta) {
@@ -431,10 +460,30 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
         connectionLabel.setVisibility(View.GONE);
         store.saveMessages(character.id, messages);
         if (completed != null && !chatVisible) notifyReply(completed);
+        if (completed != null && !spontaneous) triggerMemoryExtraction(completed);
         updateSendButton();
         scrollToBottom(false);
         if (continueForQueuedMessages) startGeneration();
         else scheduleAutonomousMessage();
+    }
+
+    /** mem0 两阶段自动记忆：对话结束后后台抽取事实并做 ADD/UPDATE/DELETE 决策。 */
+    private void triggerMemoryExtraction(ChatMessage completed) {
+        if (memoryExtracting) return;
+        AppConfig config = store.getConfig();
+        String apiKey = secureStore.getDirectApiKey();
+        if (apiKey == null || apiKey.trim().isEmpty()) return;
+        memoryExtracting = true;
+        MemoryStore memory = new MemoryStore(store);
+        List<ChatMessage> snapshot = new ArrayList<>(messages);
+        new Thread(() -> {
+            try {
+                memory.extractFacts(this, config, secureStore, apiKey, snapshot,
+                        completed.content, count -> memoryExtracting = false);
+            } catch (Exception e) {
+                memoryExtracting = false;
+            }
+        }).start();
     }
 
     private void stopGeneration() {
@@ -861,6 +910,7 @@ public final class ChatActivity extends AppCompatActivity implements MessageAdap
             adapter = new MessageAdapter(
                     this, character, store.getConfig().persona,
                     store.getConfig().personaAvatarPath, messages, this);
+            adapter.displayScripts = displayScripts;
             recycler.setAdapter(adapter);
         }
         applyChatBackground();

@@ -76,7 +76,8 @@ public final class MainActivity extends AppCompatActivity {
                 this, MiuixUi.BACKGROUND, MiuixUi.BACKGROUND);
         store = new LocalStore(this);
         setContentView(buildShell());
-        showTab(0);
+        int openTab = getIntent().getIntExtra("open_tab", 0);
+        showTab(openTab >= 0 && openTab <= 3 ? openTab : 0);
     }
 
     @Override
@@ -824,7 +825,7 @@ public final class MainActivity extends AppCompatActivity {
         final WorldBookStore.Entry entryFinal = entry;
         final WorldBookStore.Book bookFinal = book;
         LinearLayout box = MiuixUi.vertical(this);
-        EditText keysInput = MiuixUi.field(this, "关键词（逗号分隔，留空=常驻条目）", false);
+        EditText keysInput = MiuixUi.field(this, "关键词（逗号分隔）", false);
         keysInput.setText(target.keys);
         EditText contentInput = MiuixUi.field(this, "条目内容", false);
         contentInput.setText(target.content);
@@ -835,10 +836,15 @@ public final class MainActivity extends AppCompatActivity {
         enableSwitch.setChecked(target.enabled);
         enableSwitch.setText("启用此条目");
         enableSwitch.setShowText(false);
+        SwitchCompat constantSwitch = new SwitchCompat(this);
+        constantSwitch.setChecked(target.constant);
+        constantSwitch.setText("常驻条目（无条件注入，开=常驻 / 关=关键词触发）");
+        constantSwitch.setShowText(false);
         box.addView(keysInput);
         box.addView(contentInput);
         box.addView(commentInput);
         box.addView(enableSwitch);
+        box.addView(constantSwitch);
         AlertDialog dialog = new LocalizedAlertDialogBuilder(this)
                 .setTitle(entry == null ? "添加条目" : "编辑条目")
                 .setView(box)
@@ -857,14 +863,14 @@ public final class MainActivity extends AppCompatActivity {
                 created.keys = keys;
                 created.content = content;
                 created.comment = commentInput.getText().toString().trim();
-                created.constant = keys.isEmpty();
+                created.constant = constantSwitch.isChecked();
                 created.enabled = enableSwitch.isChecked();
                 bookFinal.entries.add(created);
             } else {
                 entryFinal.keys = keys;
                 entryFinal.content = content;
                 entryFinal.comment = commentInput.getText().toString().trim();
-                entryFinal.constant = keys.isEmpty();
+                entryFinal.constant = constantSwitch.isChecked();
                 entryFinal.enabled = enableSwitch.isChecked();
             }
             bookStore.upsertBook(bookFinal);

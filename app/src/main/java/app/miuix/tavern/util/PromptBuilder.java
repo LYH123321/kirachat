@@ -179,6 +179,7 @@ public final class PromptBuilder {
     }
 
     private static String matchingLore(CharacterCard card, List<ChatMessage> history, String persona) {
+        if (card.embeddedBookDisabled) return ""; // 内嵌书已提取为独立书，走独立书链路
         if (card.worldBookJson == null || card.worldBookJson.trim().isEmpty()) return "";
         StringBuilder haystack = new StringBuilder();
         int start = Math.max(0, history.size() - 8);

@@ -23,6 +23,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import app.miuix.tavern.data.LocalStore;
+import app.miuix.tavern.data.WorldBookStore;
 import app.miuix.tavern.data.MemoryStore;
 import app.miuix.tavern.model.CharacterCard;
 import app.miuix.tavern.model.ChatMessage;
@@ -733,11 +734,72 @@ public final class CharacterProfileActivity extends AppCompatActivity {
     }
 
     private void showWorldBookSummary() {
-        showText(
-                "世界书",
-                "此角色卡包含 " + displayedLoreEntryCount
-                        + " 条世界书条目。聊天时会根据最近消息自动选取相关条目。",
-                "这个角色没有关联世界书。");
+        boolean hasEmbedded = character.worldBookJson != null
+                && !character.worldBookJson.trim().isEmpty();
+        java.util.List<String> options = new java.util.ArrayList<>();
+        options.add("查看条目摘要");
+        if (hasEmbedded && !character.embeddedBookDisabled) {
+            options.add("提取内嵌世界书为可编辑书（推荐）");
+        }
+        if (hasEmbedded && character.embeddedBookDisabled) {
+            options.add("恢复使用卡内世界书（停止使用提取书）");
+        }
+        options.add("去世界书页管理独立书");
+        String[] items = options.toArray(new String[0]);
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("世界书（" + displayedLoreEntryCount + " 条）")
+                .setItems(items, (dialog, which) -> {
+                    String opt = options.get(which);
+                    if (opt.startsWith("查看")) {
+                        showText("世界书",
+                                "此角色卡包含 " + displayedLoreEntryCount
+                                        + " 条世界书条目。聊天时会根据最近消息自动选取相关条目。"
+                                        + (character.embeddedBookDisabled
+                                        ? "\n\n（卡内书已停用，改用提取出的独立书）" : ""),
+                                "这个角色没有关联世界书。");
+                    } else if (opt.startsWith("提取")) {
+                        extractEmbeddedBook();
+                    } else if (opt.startsWith("恢复")) {
+                        character.embeddedBookDisabled = false;
+                        store.upsertCharacter(character);
+                        LocalizedToast.makeText(this,
+                                "已恢复卡内世界书", android.widget.Toast.LENGTH_SHORT).show();
+                    } else {
+                        finish();
+                        startActivity(new android.content.Intent(this, MainActivity.class)
+                                .putExtra("open_tab", 2)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                    }
+                })
+                .show();
+    }
+    /** 把卡内嵌世界书提取为独立书（可编辑条目/关键词/常驻，可设全局、可绑多个角色）。 */
+    private void extractEmbeddedBook() {
+        try {
+            WorldBookStore.Book book = WorldBookStore.parseWorldBookJson(
+                    character.worldBookJson, character.name + " 的世界书");
+            if (book == null || book.entries.isEmpty()) {
+                LocalizedToast.makeText(this,
+                        "内嵌世界书为空或无法解析", android.widget.Toast.LENGTH_LONG).show();
+                return;
+            }
+            new WorldBookStore(store).upsertBook(book);
+            // 绑定到本角色
+            LocalStore.CharacterLink link = new LocalStore.CharacterLink();
+            link.characterId = character.id;
+            link.worldBookId = book.id;
+            store.upsertCharacterLink(link);
+            // 停用卡内书防重复注入
+            character.embeddedBookDisabled = true;
+            store.upsertCharacter(character);
+            LocalizedToast.makeText(this,
+                    "已提取 " + book.entries.size() + " 条到独立书「" + book.name
+                            + "」，可在世界书页编辑/设全局/绑其他角色",
+                    android.widget.Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            LocalizedToast.makeText(this,
+                    "提取失败：" + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+        }
     }
 
     private void confirmClearChat() {

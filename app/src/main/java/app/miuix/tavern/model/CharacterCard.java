@@ -25,6 +25,7 @@ public final class CharacterCard {
     public String sourceAvatar;
     public String worldBookJson;
     public String regexScriptsJson;
+    public boolean embeddedBookDisabled; // 提取内嵌世界书为独立书后停用卡内书，防重复注入
     public long lastUsed;
     public int unread;
     public boolean muted;
@@ -61,6 +62,7 @@ public final class CharacterCard {
                 .put("sourceAvatar", sourceAvatar)
                 .put("worldBookJson", worldBookJson)
                 .put("regexScriptsJson", regexScriptsJson == null ? "" : regexScriptsJson)
+                .put("embeddedBookDisabled", embeddedBookDisabled)
                 .put("lastUsed", lastUsed)
                 .put("unread", unread)
                 .put("muted", muted)
@@ -82,6 +84,7 @@ public final class CharacterCard {
         card.sourceAvatar = object.optString("sourceAvatar", "");
         card.worldBookJson = object.optString("worldBookJson", "");
         card.regexScriptsJson = object.optString("regexScriptsJson", "");
+        card.embeddedBookDisabled = object.optBoolean("embeddedBookDisabled", false);
         card.lastUsed = object.optLong("lastUsed", System.currentTimeMillis());
         card.unread = object.optInt("unread", 0);
         card.muted = object.optBoolean("muted", false);

@@ -1021,9 +1021,18 @@ public final class MainActivity extends AppCompatActivity {
                 if (c.id.equals(preset.characterId)) { boundName = " ｜绑定:" + c.name; break; }
             }
         }
+        // 正则计数（预设自带 extensions.regex_scripts）
+        int rxCount = 0;
+        java.util.List<TavernRegex.Script> rxList = null;
+        if (preset.regexScriptsJson != null && !preset.regexScriptsJson.trim().isEmpty()) {
+            rxList = TavernRegex.fromCardJson(preset.regexScriptsJson);
+            rxCount = rxList == null ? 0 : rxList.size();
+        }
+        final java.util.List<TavernRegex.Script> fRxList = rxList;
         String[] options = {
                 preset.enabled ? "整体停用" : "设为启用（生效）",
-                "prompt 逐条开关",
+                "prompt 逐条开关（当前 " + preset.prompts.size() + " 条）",
+                "查看正则脚本（当前 " + rxCount + " 条）",
                 "绑定到角色卡（当前：" + (boundName.isEmpty() ? "全局" : boundName) + "）",
                 "删除此预设"
         };
@@ -1037,14 +1046,40 @@ public final class MainActivity extends AppCompatActivity {
                     } else if (which == 1) {
                         showPresetPromptToggles(presetStore, preset);
                     } else if (which == 2) {
-                        showPresetBindDialog(presetStore, preset);
+                        showPresetRegexList(fRxList);
                     } else if (which == 3) {
+                        showPresetBindDialog(presetStore, preset);
+                    } else if (which == 4) {
                         presetStore.deletePreset(store, preset.id);
                         showTab(2);
                     }
                 })
                 .show();
-    }
+}
+
+    /** 预设自带正则脚本清单（只读展示）。 */
+    private void showPresetRegexList(java.util.List<TavernRegex.Script> list) {
+        if (list == null || list.isEmpty()) {
+            new LocalizedAlertDialogBuilder(this)
+                    .setTitle("正则脚本")
+                    .setMessage("此预设没有自带正则（extensions.regex_scripts）。")
+                    .setPositiveButton("好", null)
+                    .show();
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (TavernRegex.Script s : list) {
+            String nm = s.scriptName == null || s.scriptName.isEmpty() ? "(未命名)" : s.scriptName;
+            sb.append("• ").append(nm);
+            if (s.disabled) sb.append("（已停用）");
+            sb.append("\n");
+        }
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle("正则脚本（" + list.size() + " 条，随预设自动生效）")
+                .setMessage(sb.toString())
+                .setPositiveButton("好", null)
+                .show();
+}
     /** 预设内 prompt 逐条启用/停用（多选对话框，保存后立即生效）。 */
     private void showPresetPromptToggles(PresetStore presetStore, PresetStore.Preset preset) {
         if (preset.prompts.isEmpty()) {

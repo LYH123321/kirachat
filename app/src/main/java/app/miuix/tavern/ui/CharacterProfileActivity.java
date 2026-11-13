@@ -68,6 +68,22 @@ public final class CharacterProfileActivity extends AppCompatActivity {
 
     private View buildContent() {
         displayedLoreEntryCount = character.loreEntryCount();
+        // 独立书（绑定 + 全局）也算进条目数与入口可见性
+        try {
+            WorldBookStore bs = new WorldBookStore(store);
+            java.util.List<String> ids = new java.util.ArrayList<>();
+            for (LocalStore.CharacterLink link : store.getCharacterLinks()) {
+                if (character.id.equals(link.characterId) && !ids.contains(link.worldBookId)) ids.add(link.worldBookId);
+            }
+            for (WorldBookStore.Book b : bs.getBooks()) {
+                if (b.global && b.enabled && !ids.contains(b.id)) ids.add(b.id);
+            }
+            for (String bid : ids) {
+                WorldBookStore.Book b = bs.getBook(bid);
+                if (b == null) continue;
+                for (WorldBookStore.Entry e : b.entries) if (e.enabled) displayedLoreEntryCount++;
+            }
+        } catch (Exception ignored) { }
         LinearLayout root = MiuixUi.vertical(this);
         root.setBackgroundColor(MiuixUi.chatBackground(this));
         root.addView(buildToolbar(), new LinearLayout.LayoutParams(
@@ -734,34 +750,49 @@ public final class CharacterProfileActivity extends AppCompatActivity {
     }
 
     private void showWorldBookSummary() {
+        WorldBookStore bs = new WorldBookStore(store);
+        // 收集：绑定书（可解绑） + 全局书（提示不可解绑，只能取消全局）
+        java.util.List<WorldBookStore.Book> boundBooks = new java.util.ArrayList<>();
+        java.util.List<WorldBookStore.Book> globalBooks = new java.util.ArrayList<>();
+        for (LocalStore.CharacterLink link : store.getCharacterLinks()) {
+            if (!character.id.equals(link.characterId)) continue;
+            WorldBookStore.Book b = bs.getBook(link.worldBookId);
+            if (b != null && !b.global && !boundBooks.contains(b)) boundBooks.add(b);
+        }
+        for (WorldBookStore.Book b : bs.getBooks()) {
+            if (b.global && b.enabled && !globalBooks.contains(b)) globalBooks.add(b);
+        }
+        java.util.List<String> options = new java.util.ArrayList<>();
+        for (WorldBookStore.Book b : boundBooks) options.add("📕 " + b.name + "（绑定的独立书，点按解绑）");
+        for (WorldBookStore.Book b : globalBooks) options.add("🌐 " + b.name + "（全局书，点按去世界书页）");
         boolean hasEmbedded = character.worldBookJson != null
                 && !character.worldBookJson.trim().isEmpty();
-        java.util.List<String> options = new java.util.ArrayList<>();
-        options.add("查看条目摘要");
-        if (hasEmbedded && !character.embeddedBookDisabled) {
-            options.add("提取内嵌世界书为可编辑书（推荐）");
-        }
-        if (hasEmbedded && character.embeddedBookDisabled) {
-            options.add("恢复使用卡内世界书（停止使用提取书）");
-        }
-        options.add("去世界书页管理独立书");
+        if (hasEmbedded && !character.embeddedBookDisabled) options.add("提取内嵌世界书为可编辑书（推荐）");
+        if (hasEmbedded && character.embeddedBookDisabled) options.add("恢复使用卡内世界书");
+        options.add("去世界书页管理 / 绑定更多书");
         String[] items = options.toArray(new String[0]);
         new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("世界书（" + displayedLoreEntryCount + " 条）")
                 .setItems(items, (dialog, which) -> {
                     String opt = options.get(which);
-                    if (opt.startsWith("查看")) {
-                        showText("世界书",
-                                "此角色卡包含 " + displayedLoreEntryCount
-                                        + " 条世界书条目。聊天时会根据最近消息自动选取相关条目。"
-                                        + (character.embeddedBookDisabled
-                                        ? "\n\n（卡内书已停用，改用提取出的独立书）" : ""),
-                                "这个角色没有关联世界书。");
+                    if (which < boundBooks.size()) {
+                        // 解绑
+                        WorldBookStore.Book b = boundBooks.get(which);
+                        store.removeCharacterLink(character.id, b.id);
+                        refreshWorldBookCount();
+                        LocalizedToast.makeText(this,
+                                "已解绑「" + b.name + "」", android.widget.Toast.LENGTH_SHORT).show();
+                    } else if (which < boundBooks.size() + globalBooks.size()) {
+                        finish();
+                        startActivity(new android.content.Intent(this, MainActivity.class)
+                                .putExtra("open_tab", 2)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP));
                     } else if (opt.startsWith("提取")) {
                         extractEmbeddedBook();
                     } else if (opt.startsWith("恢复")) {
                         character.embeddedBookDisabled = false;
                         store.upsertCharacter(character);
+                        refreshWorldBookCount();
                         LocalizedToast.makeText(this,
                                 "已恢复卡内世界书", android.widget.Toast.LENGTH_SHORT).show();
                     } else {
@@ -772,6 +803,11 @@ public final class CharacterProfileActivity extends AppCompatActivity {
                     }
                 })
                 .show();
+    }
+
+    /** 重建页面刷新条目数。 */
+    private void refreshWorldBookCount() {
+        setContentView(buildContent());
     }
     /** 把卡内嵌世界书提取为独立书（可编辑条目/关键词/常驻，可设全局、可绑多个角色）。 */
     private void extractEmbeddedBook() {

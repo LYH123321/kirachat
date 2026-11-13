@@ -456,6 +456,12 @@ public final class MainActivity extends AppCompatActivity {
             status.setPadding(MiuixUi.dp(this, 10), 0, MiuixUi.dp(this, 10), 0);
             row.addView(status, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, MiuixUi.dp(this, 26)));
+            final CharacterCard cardFinal = card;
+            item.setOnClickListener(v -> showEmbeddedBookDetail(cardFinal));
+            item.setOnLongClickListener(v -> {
+                showEmbeddedBookManager(cardFinal);
+                return true;
+            });
             addWithPageMargins(page, item, 0, 10);
         }
         if (books.isEmpty() && embedded == 0) {
@@ -732,6 +738,78 @@ public final class MainActivity extends AppCompatActivity {
                 .setTitle(book.name + "（" + book.enabledCount() + "/" + book.entries.size() + "）")
                 .setView(scroll)
                 .setPositiveButton("完成", null)
+                .show();
+    }
+
+    /** 内嵌书条目摘要（点按卡片）。 */
+    private void showEmbeddedBookDetail(CharacterCard card) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            JSONObject book = new JSONObject(card.worldBookJson);
+            JSONArray entries = book.optJSONArray("entries");
+            if (entries != null) {
+                for (int i = 0; i < entries.length() && i < 200; i++) {
+                    JSONObject e = entries.optJSONObject(i);
+                    if (e == null) continue;
+                    JSONObject ext = e.optJSONObject("extensions");
+                    boolean enabled = ext == null || !ext.optBoolean("disable", false);
+                    boolean constant = e.optBoolean("constant", false);
+                    sb.append(enabled ? "● " : "○ ")
+                      .append(constant ? "[常驻]" : "")
+                      .append(e.optString("comment", "")).append('\n');
+                }
+                if (entries.length() > 200) sb.append("…共 ").append(entries.length()).append(" 条\n");
+            }
+        } catch (Exception e) {
+            sb.append("解析失败");
+        }
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle(card.name + " 内嵌世界书")
+                .setMessage(sb.length() == 0 ? "空书" : sb.toString())
+                .setPositiveButton("完成", null)
+                .show();
+    }
+
+    /** 内嵌书管理（长按卡片）：提取为独立书 / 恢复卡内书 / 跳转资料页。 */
+    private void showEmbeddedBookManager(CharacterCard card) {
+        boolean disabled = card.embeddedBookDisabled;
+        String[] options = {disabled ? "恢复使用卡内世界书" : "提取内嵌世界书为可编辑书（推荐）",
+                "去角色资料页管理"};
+        new LocalizedAlertDialogBuilder(this)
+                .setTitle(card.name + "（" + card.loreEntryCount() + " 条内嵌设定）")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        if (disabled) {
+                            card.embeddedBookDisabled = false;
+                            store.upsertCharacter(card);
+                            LocalizedToast.makeText(this, "已恢复卡内世界书",
+                                    Toast.LENGTH_SHORT).show();
+                        } else {
+                            WorldBookStore.Book book = WorldBookStore.parseWorldBookJson(
+                                    card.worldBookJson, card.name + " 的世界书");
+                            if (book == null || book.entries.isEmpty()) {
+                                LocalizedToast.makeText(this, "内嵌世界书为空或无法解析",
+                                        Toast.LENGTH_LONG).show();
+                                return;
+                            }
+                            new WorldBookStore(store).upsertBook(book);
+                            LocalStore.CharacterLink link = new LocalStore.CharacterLink();
+                            link.characterId = card.id;
+                            link.worldBookId = book.id;
+                            store.upsertCharacterLink(link);
+                            card.embeddedBookDisabled = true;
+                            store.upsertCharacter(card);
+                            LocalizedToast.makeText(this,
+                                    "已提取 " + book.entries.size() + " 条到独立书，长按该书可批量转触发/设全局",
+                                    Toast.LENGTH_LONG).show();
+                        }
+                        showTab(2);
+                    } else {
+                        Intent i = new Intent(this, CharacterProfileActivity.class);
+                        i.putExtra(CharacterProfileActivity.EXTRA_CHARACTER_ID, card.id);
+                        startActivity(i);
+                    }
+                })
                 .show();
     }
 

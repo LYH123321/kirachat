@@ -18,8 +18,11 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install SDK components (platform 29 / build-tools 29.0.3)
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-29" "build-tools;29.0.3" > /dev/null
 
       - name: Build debug APK
         run: |

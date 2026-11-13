@@ -811,6 +811,8 @@ public final class MainActivity extends AppCompatActivity {
             }
         }
         WorldBookStore.Entry target = entry != null ? entry : new WorldBookStore.Entry();
+        final WorldBookStore.Entry entryFinal = entry;
+        final WorldBookStore.Book bookFinal = book;
         LinearLayout box = MiuixUi.vertical(this);
         EditText keysInput = MiuixUi.field(this, "关键词（逗号分隔）", false);
         keysInput.setText(target.keys);
@@ -833,7 +835,7 @@ public final class MainActivity extends AppCompatActivity {
             String keys = keysInput.getText().toString().trim();
             String content = contentInput.getText().toString().trim();
             if (keys.isEmpty() && content.isEmpty()) return;
-            if (entry == null) {
+            if (entryFinal == null) {
                 WorldBookStore.Entry created = new WorldBookStore.Entry();
                 created.id = java.util.UUID.randomUUID().toString();
                 created.bookId = bookId;
@@ -842,23 +844,23 @@ public final class MainActivity extends AppCompatActivity {
                 created.comment = commentInput.getText().toString().trim();
                 created.constant = keys.isEmpty();
                 created.enabled = true;
-                book.entries.add(created);
+                bookFinal.entries.add(created);
             } else {
-                entry.keys = keys;
-                entry.content = content;
-                entry.comment = commentInput.getText().toString().trim();
+                entryFinal.keys = keys;
+                entryFinal.content = content;
+                entryFinal.comment = commentInput.getText().toString().trim();
             }
-            bookStore.upsertBook(book);
+            bookStore.upsertBook(bookFinal);
             dialog.dismiss();
             showTab(2);
         });
         View deleteBtn = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-        if (entry == null) {
+        if (entryFinal == null) {
             deleteBtn.setVisibility(View.GONE);
         } else {
             deleteBtn.setOnClickListener(v2 -> {
-                book.entries.remove(entry);
-                bookStore.upsertBook(book);
+                bookFinal.entries.remove(entryFinal);
+                bookStore.upsertBook(bookFinal);
                 dialog.dismiss();
                 showTab(2);
             });

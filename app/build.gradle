@@ -15,8 +15,8 @@ android {
         applicationId "app.miuix.tavern"
         minSdkVersion 26
         targetSdkVersion 29
-        versionCode 12
-        versionName "0.12.0-tavern"
+        versionCode 13
+        versionName "0.12.1-tavern"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "String", "POINTS_SERVER_URL",

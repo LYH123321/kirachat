@@ -742,6 +742,7 @@ public final class MainActivity extends AppCompatActivity {
         if (book == null) return;
         String[] options = {"添加条目", "绑定到角色卡", book.enabled ? "停用此书" : "启用此书",
                 book.global ? "取消全局（仅绑定的角色生效）" : "设为全局书（所有角色生效）",
+                "常驻条目全部改为按关键词触发",
                 "删除此书"};
         new LocalizedAlertDialogBuilder(this)
                 .setTitle(book.name + (book.global ? " ｜全局" : ""))
@@ -759,6 +760,23 @@ public final class MainActivity extends AppCompatActivity {
                         bookStore.upsertBook(book);
                         showTab(2);
                     } else if (which == 4) {
+                        int changed = 0;
+                        for (WorldBookStore.Entry entry : book.entries) {
+                            if (!entry.constant) continue;
+                            entry.constant = false;
+                            // 常驻条目通常没填关键词，用备注名兜底当触发词
+                            if (entry.keys == null || entry.keys.trim().isEmpty()) {
+                                String fallback = entry.comment == null ? "" : entry.comment.trim();
+                                entry.keys = fallback.isEmpty() ? entry.id.substring(0, 6) : fallback;
+                            }
+                            changed++;
+                        }
+                        bookStore.upsertBook(book);
+                        LocalizedToast.makeText(this,
+                                "已把 " + changed + " 条常驻改为关键词触发（无关键词的用备注名兜底）",
+                                Toast.LENGTH_LONG).show();
+                        showTab(2);
+                    } else if (which == 5) {
                         bookStore.deleteBook(book.id);
                         showTab(2);
                     }

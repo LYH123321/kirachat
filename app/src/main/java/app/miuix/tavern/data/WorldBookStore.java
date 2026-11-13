@@ -26,8 +26,10 @@ public final class WorldBookStore {
         public int order = 100;
 
         public String keysDisplay() {
-            if (keys == null || keys.trim().isEmpty()) return constant ? "[常驻]" : "[无关键词]";
-            return keys;
+            String base;
+            if (keys == null || keys.trim().isEmpty()) base = constant ? "[常驻]" : "[无关键词]";
+            else base = keys;
+            return enabled ? base : "✕停用 " + base;
         }
     }
 

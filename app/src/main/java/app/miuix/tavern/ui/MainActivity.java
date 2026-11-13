@@ -38,6 +38,7 @@ import app.miuix.tavern.model.AppConfig;
 import app.miuix.tavern.model.CharacterCard;
 import app.miuix.tavern.model.GroupChat;
 import app.miuix.tavern.util.CharacterCardImporter;
+import app.miuix.tavern.util.TavernRegex;
 import app.miuix.tavern.network.RemoteSyncManager;
 
 import java.io.ByteArrayOutputStream;
@@ -1069,7 +1070,8 @@ public final class MainActivity extends AppCompatActivity {
         }
         StringBuilder sb = new StringBuilder();
         for (TavernRegex.Script s : list) {
-            String nm = s.scriptName == null || s.scriptName.isEmpty() ? "(未命名)" : s.scriptName;
+            String nm = "(未命名)";
+            if (s.scriptName != null && !s.scriptName.isEmpty()) nm = s.scriptName;
             sb.append("• ").append(nm);
             if (s.disabled) sb.append("（已停用）");
             sb.append("\n");
